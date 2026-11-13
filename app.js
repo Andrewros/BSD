@@ -271,7 +271,7 @@ function pendingInspectionPanel() {
     if (!ownTarget) return '<div class="inspection-response"><span class="eyebrow">A MYSTERY</span><h2>A mysterious interruption.</h2><p class="waiting-line">Waiting for Andrew. The packet’s contents remain private.</p></div>';
     const cards = before ? target.bag.cards : pending.returnCards;
     const draft = andrewDrafts.get(pendingInspectionKey()) || cards;
-    return `<div class="inspection-response"><span class="eyebrow">PRIVATE · GOD ANDREW</span><h2>${before ? 'Inspection committed.' : 'Your cards are returning.'}</h2><p>${before ? 'Choose the cards the inspector will find. These cards determine fines and stolen goods.' : 'Choose what your returned cards become in your stash. The inspection payment is already determined.'} Keep ${cards.length} cards. The deck is unchanged.</p><form id="andrew-change-form"><div class="response-actions"><button class="ability-button" type="button" data-action="andrew-all-burners">All burners</button><button class="secondary-button" type="button" data-action="andrew-all-legal">All legal</button></div><div class="andrew-picker">${cards.map((key, i) => `<label for="andrew-card-${i}">Card ${i + 1}<select id="andrew-card-${i}" data-andrew-index="${i}">${Object.entries(GOODS).map(([value, good]) => `<option value="${value}" ${draft[i] === value ? 'selected' : ''}>${good.name}</option>`).join('')}</select></label>`).join('')}</div><div class="response-actions"><button class="ability-button" type="submit">Apply cards</button><button class="secondary-button" type="button" data-action="andrew-skip">Keep current cards</button></div></form></div>`;
+    return `<div class="inspection-response"><span class="eyebrow">PRIVATE · GOD ANDREW</span><h2>${before ? 'Inspection committed.' : 'Your cards are returning.'}</h2><p>${before ? 'Choose the cards the inspector will find. These cards determine fines and stolen goods.' : 'Choose what your returned cards become in your stash. The inspection payment is already determined.'} Keep ${cards.length} cards. The deck is unchanged.</p><form id="andrew-change-form"><div class="response-actions"><button class="ability-button" type="button" data-action="andrew-all-burners">All burners</button><button class="secondary-button" type="button" data-action="andrew-all-legal">All legal</button><button class="secondary-button" type="button" data-action="andrew-match-first">Match first card</button></div><div class="andrew-picker">${cards.map((key, i) => `<label for="andrew-card-${i}">Card ${i + 1}<select id="andrew-card-${i}" data-andrew-index="${i}">${Object.entries(GOODS).map(([value, good]) => `<option value="${value}" ${draft[i] === value ? 'selected' : ''}>${good.name}</option>`).join('')}</select></label>`).join('')}</div><div class="response-actions"><button class="ability-button" type="submit">Apply cards</button><button class="secondary-button" type="button" data-action="andrew-skip">Keep current cards</button></div></form></div>`;
   }
   if (pending.stage === 'dahlia-response') {
     const cards = ownTarget ? target.bag.cards.map((key, i) => evidenceCard(key, i, 'dahlia-card', dahliaSelected.has(i))).join('') : '<p>The packet remains sealed. Only Dahlia can see its cards.</p>';
@@ -409,11 +409,12 @@ function leave() {
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-action]'); if (!button || button.disabled) return;
   const action = button.dataset.action;
-  if (action === 'andrew-all-burners' || action === 'andrew-all-legal') {
+  if (['andrew-all-burners', 'andrew-all-legal', 'andrew-match-first'].includes(action)) {
     const pending = state?.pendingInspection, owner = me();
     if (!pending || pending.target !== selfId || !['andrew-before', 'andrew-after'].includes(pending.stage)) return;
     const cards = pending.stage === 'andrew-before' ? owner.bag.cards : pending.returnCards;
-    const good = action === 'andrew-all-burners' ? 'burnerPhone' : owner.bag.declaration;
+    const good = action === 'andrew-all-burners' ? 'burnerPhone' : action === 'andrew-match-first' ? document.querySelector('#andrew-card-0')?.value : owner.bag.declaration;
+    if (!Object.hasOwn(GOODS, good)) return;
     return send({ type: 'andrew-change', cards: cards.map(() => good) });
   }
   if (action === 'andrew-skip') return send({ type: action });
