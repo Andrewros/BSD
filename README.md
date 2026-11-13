@@ -75,7 +75,7 @@ When euros cannot cover a penalty, stash goods transfer at face value in the ord
 
 ## Characters and abilities
 
-The supplied character photographs are included in `assets/characters/` and framed with CSS for the portraits. Every seat has one unique character. Character choices lock at game start. Human active abilities are triggered through visible buttons, with used/ready status on the player cards; no automatic active-ability activations or browser alerts are used. Inspection responses are inline panels, and reconnecting preserves the pending decision.
+The supplied character photographs are included in `assets/characters/` and framed with CSS for the portraits. The lobby creator can use “Start as D.E.A.” on any player’s card to choose the first agent. The badge then rotates in seat order. Every seat has one unique character. Character choices lock at game start. Human active abilities are triggered through visible buttons, with used/ready status on the player cards; no automatic active-ability activations or browser alerts are used. Inspection responses are inline panels, and reconnecting preserves the pending decision.
 
 | Character | Ability |
 | --- | --- |

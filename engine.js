@@ -111,7 +111,9 @@ export function addPlayer(g, id, name, bot = false) {
 }
 export function removePlayer(g, id) {
   if (g.phase !== 'lobby' || id === g.hostId) throw Error('Players can only be removed in the lobby.');
+  const firstDea = g.players[g.dea]?.id;
   g.players = g.players.filter(p => p.id !== id);
+  g.dea = Math.max(0, g.players.findIndex(p => p.id === firstDea));
 }
 export function startGame(g, actor) {
   if (actor !== g.hostId || g.phase !== 'lobby') throw Error('Only the host can start a new game.');
@@ -575,6 +577,12 @@ function applyAction(g, actor, action, bypassAndrew = false) {
     g.chat = g.chat.slice(-60); return;
   }
   if (action.type === 'start') return startGame(g, actor);
+  if (action.type === 'choose-first-dea') {
+    if (g.phase !== 'lobby' || actor !== g.hostId) throw Error('Only the lobby creator can choose the starting D.E.A., before the game starts.');
+    const index = g.players.findIndex(other => other.id === action.target);
+    if (index < 0) throw Error('Choose a player at this table.');
+    g.dea = index; note(g, `${g.players[index].name} will start as D.E.A.`); return;
+  }
   if (action.type === 'choose-character') {
     if (g.phase !== 'lobby') throw Error('Characters are locked after the game starts.');
     const target = action.target ? g.players.find(p => p.id === action.target) : p;

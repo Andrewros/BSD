@@ -1,6 +1,6 @@
 import { createGame, addPlayer, act, viewFor } from './engine.js';
 
-const PREFIX = 'better-smug-drug-v14-';
+const PREFIX = 'better-smug-drug-v15-';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export function roomCode() {
   return Array.from(crypto.getRandomValues(new Uint8Array(6)), n => ALPHABET[n % ALPHABET.length]).join('');
@@ -37,7 +37,7 @@ export class TableNetwork {
       clearTimeout(readyTimeout);
       try {
         const m = conn.metadata;
-        if (!m || m.version !== 14 || typeof m.id !== 'string' || !/^[a-zA-Z0-9-]{20,60}$/.test(m.id) || typeof m.token !== 'string' || !/^[a-zA-Z0-9-]{20,60}$/.test(m.token) || m.id === this.game.hostId) throw Error('Invalid guest identity.');
+        if (!m || m.version !== 15 || typeof m.id !== 'string' || !/^[a-zA-Z0-9-]{20,60}$/.test(m.id) || typeof m.token !== 'string' || !/^[a-zA-Z0-9-]{20,60}$/.test(m.token) || m.id === this.game.hostId) throw Error('Invalid guest identity.');
         const existing = this.game.players.find(p => p.id === m.id);
         if (existing && this.secrets.get(m.id) !== m.token) throw Error('This seat belongs to another merchant. Rejoin from your original browser tab.');
         if (existing?.bot) throw Error('That seat is unavailable.');
@@ -75,7 +75,7 @@ export class TableNetwork {
     this.timeout = setTimeout(() => this.fail('Connection timed out. Ask the host to keep their table open, or try another network.'), 20000);
     peer.on('open', () => {
       if (this.closed || this.conn?.open) return;
-      const conn = peer.connect(PREFIX + code, { reliable: true, metadata: { name, id, token: this.token, analyticsId: this.analyticsId, version: 14 } });
+      const conn = peer.connect(PREFIX + code, { reliable: true, metadata: { name, id, token: this.token, analyticsId: this.analyticsId, version: 15 } });
       this.conn = conn;
       conn.on('data', message => {
         if (this.closed) return;

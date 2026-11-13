@@ -9,7 +9,7 @@ class FakePeer extends EventEmitter {
   reconnect() {}
 }
 class Connection extends EventEmitter {
-  constructor(id, token, name = 'Guest') { super(); this.metadata = { id, token, name, version: 14 }; this.messages = []; this.open = false; }
+  constructor(id, token, name = 'Guest') { super(); this.metadata = { id, token, name, version: 15 }; this.messages = []; this.open = false; }
   send(message) { this.messages.push(structuredClone(message)); }
   close() { this.open = false; this.emit('close'); }
   connect() { this.open = true; this.emit('open'); }
@@ -28,6 +28,7 @@ test('host sends individualized state and never exposes reconnect secrets', () =
   const { net } = host();
   try {
     const a = connect(net), b = connect(net, 'other-identity-000000000', 'other-secret-00000000000');
+    net.game.players.forEach((p, i) => p.character = ['benny', 'wendy', 'steve'][i]);
     net.send({ type: 'start' });
     const aView = a.messages.at(-1).state, bView = b.messages.at(-1).state;
     assert.equal(aView.players[2].hand, null); assert.equal(bView.players[1].hand, null);

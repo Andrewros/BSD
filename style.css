@@ -79,3 +79,7 @@
   .score-identity { gap: 8px; }
   .score-identity .score-portrait { width: 34px; height: 46px; }
 }
+
+.first-dea-button { display: block; margin-top: 14px; min-height: 32px; }
+.first-dea-button:disabled { opacity: 1; color: var(--gold-light); cursor: default; }
+.first-dea-note { font-size: 11px; line-height: 1.8; color: var(--muted); margin-top: 20px; }
