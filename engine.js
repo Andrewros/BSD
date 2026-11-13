@@ -26,6 +26,7 @@ export const CATALOG_SIZE = Object.values(GOODS).reduce((n, good) => n + good.co
 export function deaTurnsPerPlayer(playerCount) { return playerCount <= 3 ? 3 : 2; }
 export function totalRounds(g) { return g.players.length * deaTurnsPerPlayer(g.players.length); }
 export const CHARACTERS = {
+  andrew: { name: 'Awesome Andrew', ability: 'Mystery', timing: 'A mystery', uses: null, description: 'His abilities are a mystery.' },
   shinomiya: { name: 'Sinister Shinomiya', ability: 'Because I’m a genius', timing: 'Before declarations · Once per game', description: 'When you are not the D.E.A., challenge another smuggler after envelopes are loaded. At round end, compare the printed values of goods delivered from your two envelopes. The higher total wins both deliveries. A tie changes nothing.' },
   katagiri: { name: 'Killer Katagiri', ability: 'The Devil Himself', timing: 'Start / end of game · Passive', description: 'Pay each other player €10 at the start. Collect ordinary Bread, Fish, Meat, Wine, and any illegal card to complete your set. Until then, your illegal-card fines are doubled. Completing the set unlocks a €20 payment from every other player at game end.' },
   fring: { name: 'Fearsome Fring', ability: 'The Boss Man', timing: 'Inspection · Once per game', description: 'When you are not the D.E.A., take over one other smuggler’s inspection. Steal their illegal cards. If every card is legal, pay the smuggler €3 instead.' },
@@ -144,7 +145,7 @@ function draw(g, p, n) {
 function discardCards(g, cards) { g.discard.push(...cards); }
 function payNeedleInspection(g, inspector, merchant) {
   if (!merchant.bag.cards.includes('usedNeedle') || merchant.bag.needlePaid) return;
-  merchant.bag.needlePaid = true; payment(inspector, merchant, 8);
+  merchant.bag.needlePaid = true; inspectionPayment(merchant, inspector, merchant, 8, 'Used Needle');
   note(g, `${inspector.name} paid ${merchant.name} €8 for the Used Needle, in addition to normal inspection payments.`);
 }
 function settleSpecialCards(g, merchant, result, delivered) {
@@ -153,6 +154,23 @@ function settleSpecialCards(g, merchant, result, delivered) {
   const special = merchant.bag.cards.filter(key => GOODS[key].special);
   if (!special.length) return delivered;
   const opened = result.cards !== null;
+  if (merchant.character === 'andrew' && merchant.godAndrew) {
+    // Created special cards still leave play when used. Remove only this
+    // packet's copies, preserving any older transformed cards in a stash.
+    const inspector = g.players.find(p => p.id === merchant.bag.actualInspector) || g.players[g.dea];
+    if (special.includes('usedNeedle')) {
+      if (opened) payNeedleInspection(g, inspector, merchant);
+      else payment(merchant, g.players[g.dea], 4);
+    }
+    for (const key of special) {
+      const destination = delivered.includes(key) ? merchant.stall : merchant.bag.abilityClaim === 'fring' ? inspector.stall : merchant.bag.abilityClaim === 'zach' && merchant.bag.cards.every(c => isLegalFor(merchant, c, g)) ? inspector.stall : g.discard;
+      const index = destination.lastIndexOf(key);
+      if (index >= 0) destination.splice(index, 1);
+      (g.retired ||= []).push(key);
+    }
+    result.message += ' Used special cards left the game.';
+    return delivered.filter(key => !GOODS[key].special);
+  }
   if (special.includes('usedNeedle')) {
     const inspector = g.players.find(p => p.id === merchant.bag.actualInspector) || g.players[g.dea];
     if (opened) payNeedleInspection(g, inspector, merchant);
@@ -183,6 +201,7 @@ function resolvePiper(g, p, action) {
 }
 export const TRIGGER_WINDOW_MS = 20000;
 const TRIGGER_SKIPS = {
+  'andrew-before': 'andrew-skip', 'andrew-after': 'andrew-skip',
   'heisenberg-response': 'heisenberg-decline', 'dahlia-response': 'dahlia-skip',
   'dana-response': 'dana-decline', 'pete-response': 'pete-skip', 'badger-response': 'badger-skip',
   'mike-response': 'mike-skip', 'carl-response': 'carl-skip', 'selena-fine': 'selena-pay', 'trump-response': 'trump-skip'
@@ -206,6 +225,7 @@ export function expireAbilities(g, now = Date.now()) {
     const before = analyticsBefore(g, actor);
     applyAction(g, actor, { type: skip }); recordAnalyticsAction(g, actor, { type: skip, automatic: true }, before); syncTriggerDeadline(g, now); changed = true;
   }
+  if (changed) { settlePaidPassages(g); clearInvalidRequests(g); syncTriggerDeadline(g, now); }
   return changed;
 }
 
@@ -213,10 +233,15 @@ function matchesDeclaration(p, key, g) { return key === 'usedNeedle' || (key ===
 function newRound(g) {
   g.phase = 'market'; g.results = []; g.contest = null; g.marketDraws = {};
   g.protections = g.protections.filter(protection => protection.round >= g.round);
-  for (const p of g.players) { p.ready = false; p.bag = null; p.bribeOffer = 0; p.bonusDraws = []; draw(g, p, 6 - p.hand.filter(key => key !== 'usedNeedle').length); }
+  for (const p of g.players) { p.ready = false; p.bag = null; p.bribeOffer = 0; p.deaRequest = null; p.paidPassage = null; p.bonusDraws = []; draw(g, p, 6 - p.hand.filter(key => key !== 'usedNeedle').length); }
   note(g, `${g.players[g.dea].name} is the D.E.A. Market is open.`);
 }
-function note(g, message) { g.log.push(message); g.log = g.log.slice(-60); }
+function note(g, message) {
+  g.log.push(message); g.log = g.log.slice(-2000);
+  (g.publicActions ||= []).push({ id: g.publicActionSequence = (g.publicActionSequence || 0) + 1, at: Date.now(), round: g.round, phase: g.phase, text: message });
+  g.publicActions = g.publicActions.slice(-2000);
+}
+function publicCards(cards) { const counts = new Map(); for (const key of cards) counts.set(key, (counts.get(key) || 0) + 1); return [...counts].map(([key, count]) => `${count}× ${GOODS[key].name}`).join(', '); }
 function merchants(g) { return g.players.filter((_, i) => i !== g.dea); }
 function selection(p, indices, min, max) {
   if (!Array.isArray(indices) || indices.length < min || indices.length > max || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= p.hand.length)) throw Error(`Select ${min}–${max} cards.`);
@@ -232,6 +257,13 @@ function payment(from, to, amount) {
     const card = from.stall.shift(); to.stall.push(card); remaining -= GOODS[card].value; paid += GOODS[card].value;
   }
   return paid;
+}
+function inspectionReceipt(merchant, from, to, amount, settled, kind = 'Inspection', bank = false, coins = settled) {
+  (merchant.bag.inspectionPayments ||= []).push({ payer: from?.id || null, payee: to?.id || null, amount, settled, coins, kind, bank });
+}
+function inspectionPayment(merchant, from, to, amount, kind = 'Inspection') {
+  const before = from.coins, settled = payment(from, to, amount);
+  inspectionReceipt(merchant, from, to, amount, settled, kind, false, before - from.coins); return settled;
 }
 function bribePayment(g, from, to, amount) {
   const coinPayment = Math.min(from.coins, amount), paid = payment(from, to, amount);
@@ -268,15 +300,33 @@ function settleContest(g) {
   }
   note(g, `${winner.name} won Shinomiya’s contest (€${Math.max(aValue, bValue)} to €${Math.min(aValue, bValue)}) and claimed ${loser.name}’s delivered goods.`);
 }
-function resolveEnvelope(g, merchant, result, delivered) {
-  delivered = settleSpecialCards(g, merchant, result, delivered);
+function resolveEnvelope(g, merchant, result, delivered, afterAndrew = false) {
+  if (!afterAndrew) delivered = settleSpecialCards(g, merchant, result, delivered);
+  if (merchant.character === 'andrew' && merchant.godAndrew && delivered.length && !afterAndrew) {
+    // Resolution has paid its fees and moved the goods. Hold only returned goods
+    // until Andrew chooses their new identities; do not draw or edit the deck.
+    for (const key of delivered) {
+      const index = merchant.stall.lastIndexOf(key);
+      if (index >= 0) merchant.stall.splice(index, 1);
+    }
+    merchant.bag.resolved = true;
+    g.pendingInspection = { stage: 'andrew-after', target: merchant.id, inspector: merchant.bag.actualInspector || g.players[g.dea].id, returnCards: [...delivered], outcome: { result, delivered } };
+    return;
+  }
+  if (Array.isArray(result.cards)) result.inspection = {
+    id: `${g.round}:${merchant.id}:${g.inspectionSequence = (g.inspectionSequence || 0) + 1}`,
+    round: g.round, merchant: merchant.id, inspector: merchant.bag.actualInspector || g.players[g.dea].id,
+    declaration: merchant.bag.declaration, cardMatches: result.cards.map(key => matchesDeclaration(merchant, key, g)), honest: result.honest ?? merchant.bag.cards.every(key => matchesDeclaration(merchant, key, g)),
+    payments: structuredClone(merchant.bag.inspectionPayments || [])
+  };
   if (g.analytics) {
     const declaredCards = merchant.bag.declaredCards || merchant.bag.cards;
     g.analytics.packets.push({ round: g.round, merchant: g.players.indexOf(merchant), dea: g.dea, declaration: merchant.bag.declaration, declaredCards: [...declaredCards], effectiveCards: [...merchant.bag.cards], declaredHonest: merchant.bag.declaredHonest ?? declaredCards.every(key => matchesDeclaration(merchant, key, g)), effectiveHonest: merchant.bag.cards.every(key => matchesDeclaration(merchant, key, g)), opened: result.cards !== null, outcome: result.kind, delivered: [...delivered], ability: merchant.bag.abilityClaim || null, bribeOffered: merchant.bag.bribe });
   }
-  merchant.bag.deaRequest = null;
+  merchant.bag.deaRequest = null; merchant.deaRequest = null;
   merchant.bag.delivered = [...delivered]; merchant.bag.resolved = true;
   awardWendyDraws(g, merchant, delivered);
+  if (result.cards) note(g, `${merchant.name} revealed ${result.cards.length} card(s): ${publicCards(result.cards)}.`);
   g.results.push(result); note(g, `${merchant.name}: ${result.message}`);
   updateCollections(g);
   const illegalCount = delivered.filter(key => !isLegalFor(merchant, key, g)).length;
@@ -287,8 +337,8 @@ function resolveEnvelope(g, merchant, result, delivered) {
 }
 const NEGOTIABLE_STAGES = ['heisenberg-response', 'dahlia-response', 'dahlia-choice', 'l-review'];
 function requestTarget(g, id) {
-  if (g.phase !== 'inspect') throw Error('Request bribes during the inspection phase.');
-  const target = merchants(g).find(p => p.id === id && p.bag && !p.bag.resolved);
+  if (!['market', 'pack', 'declare', 'inspect'].includes(g.phase)) throw Error('Negotiate bribes from market through inspection.');
+  const target = merchants(g).find(p => p.id === id && !p.bag?.resolved && !p.paidPassage);
   if (!target) throw Error('Choose an unresolved smuggler’s packet.');
   if (g.pendingInspection?.target === target.id && !NEGOTIABLE_STAGES.includes(g.pendingInspection.stage)) throw Error('That packet has already been opened or claimed by another ability.');
   return target;
@@ -298,37 +348,57 @@ function handleBribeRequest(g, p, action) {
   if (action.type === 'request-bribe') {
     if (p !== inspector) throw Error('Only the D.E.A. can request a bribe.');
     const target = requestTarget(g, action.target);
-    if (action.amount === null) { target.bag.deaRequest = null; note(g, `${p.name} withdrew the bribe request for ${target.name}.`); return; }
+    if (action.amount === null) { setDeaRequest(target, null); note(g, `${p.name} withdrew the bribe request for ${target.name}.`); return; }
     if (!Number.isSafeInteger(action.amount) || action.amount < 0) throw Error('Request a nonnegative whole number of coins.');
-    target.bag.deaRequest = { id: `${g.round}-${g.bribeRequestSequence = (g.bribeRequestSequence || 0) + 1}`, amount: action.amount };
+    setDeaRequest(target, { id: `${g.round}-${g.bribeRequestSequence = (g.bribeRequestSequence || 0) + 1}`, amount: action.amount });
     note(g, `${p.name} requested €${action.amount} from ${target.name}: accepting pays and passes the packet automatically.`); return;
   }
   if (p === inspector) throw Error('Only the packet owner can accept or decline the request.');
-  const target = requestTarget(g, p.id), request = target.bag.deaRequest;
+  const target = requestTarget(g, p.id), request = target.bag?.deaRequest || target.deaRequest;
   if (!request || action.request !== request.id) throw Error('The D.E.A. request changed or was withdrawn. Review the current request.');
-  if (action.type === 'decline-request') { target.bag.deaRequest = null; note(g, `${p.name} declined the D.E.A.’s €${request.amount} request.`); return; }
+  if (action.type === 'decline-request') { setDeaRequest(target, null); note(g, `${p.name} declined the D.E.A.’s €${request.amount} request.`); return; }
   if (g.pendingInspection && g.pendingInspection.target !== p.id) throw Error('Wait for the current packet decision before accepting.');
   if (p.coins < request.amount) throw Error('You do not have enough coins to accept this request.');
+  if (g.phase !== 'inspect') { agreeEarlyPassage(g, inspector, target, request.amount); return; }
   target.bag.bribe = request.amount; target.bribeOffer = request.amount;
   acceptBribe(g, inspector, { type: 'accept-bribe', target: target.id, expectedAmount: request.amount });
 }
+function setDeaRequest(p, request) { p.deaRequest = request; if (p.bag) p.bag.deaRequest = request; }
+function agreeEarlyPassage(g, inspector, merchant, amount) {
+  if (merchant.paidPassage) throw Error('This round’s passage is already paid.');
+  if (merchant.coins < amount) throw Error('You do not have enough coins to accept this deal.');
+  bribePayment(g, merchant, inspector, amount);
+  merchant.bribeOffer = amount; if (merchant.bag) merchant.bag.bribe = amount;
+  merchant.paidPassage = { round: g.round, amount }; setDeaRequest(merchant, null);
+  note(g, `${merchant.name} and ${inspector.name} agreed to €${amount} for passage. Payment is complete; the packet will pass automatically after loading and declarations.`);
+}
+function settlePaidPassages(g) {
+  if (g.phase !== 'inspect' || g.pendingInspection) return;
+  for (const merchant of merchants(g)) {
+    if (!merchant.paidPassage || !merchant.bag?.declaration || merchant.bag.resolved) continue;
+    merchant.stall.push(...merchant.bag.cards);
+    resolveEnvelope(g, merchant, { name: merchant.name, kind: 'passed', message: `Prepaid passage honored. €${merchant.paidPassage.amount} was paid when the deal was accepted; no second bribe is charged.`, cards: null }, merchant.bag.cards);
+    if (g.pendingInspection || g.phase !== 'inspect') break;
+  }
+}
 function clearInvalidRequests(g) {
-  for (const p of g.players) if (p.bag?.deaRequest && (p.bag.resolved || g.phase !== 'inspect' || (g.pendingInspection?.target === p.id && !NEGOTIABLE_STAGES.includes(g.pendingInspection.stage)))) p.bag.deaRequest = null;
+  for (const p of g.players) if ((p.deaRequest || p.bag?.deaRequest) && (p.paidPassage || p.bag?.resolved || !['market', 'pack', 'declare', 'inspect'].includes(g.phase) || (g.pendingInspection?.target === p.id && !NEGOTIABLE_STAGES.includes(g.pendingInspection.stage)))) setDeaRequest(p, null);
 }
 
 function assertCurrentOffer(merchant, action) {
-  if (action.expectedAmount !== undefined && action.expectedAmount !== merchant.bag.bribe) throw Error('The bribe changed or was revoked. Review the current offer.');
-  if (merchant.bag.bribe > merchant.coins) throw Error('The offered bribe is no longer affordable. Ask for a new offer.');
+  if (action.expectedAmount !== undefined && action.expectedAmount !== (merchant.bag?.bribe ?? merchant.bribeOffer ?? 0)) throw Error('The bribe changed or was revoked. Review the current offer.');
+  if ((merchant.bag?.bribe ?? merchant.bribeOffer ?? 0) > merchant.coins) throw Error('The offered bribe is no longer affordable. Ask for a new offer.');
 }
 function passUnopened(g, inspector, merchant, message = 'Current offer accepted; packet passed unopened.') {
   bribePayment(g, merchant, inspector, merchant.bag.bribe); merchant.stall.push(...merchant.bag.cards);
   resolveEnvelope(g, merchant, { name: merchant.name, kind: 'passed', message: `${message} €${merchant.bag.bribe} paid.`, cards: null }, merchant.bag.cards);
 }
 function acceptBribe(g, inspector, action) {
-  if (g.phase !== 'inspect' || g.players[g.dea] !== inspector) throw Error('Only the D.E.A. may accept a packet’s bribe.');
-  const merchant = merchants(g).find(p => p.id === action.target && p.bag && !p.bag.resolved);
+  if (!['market', 'pack', 'declare', 'inspect'].includes(g.phase) || g.players[g.dea] !== inspector) throw Error('Only the D.E.A. may accept a smuggler’s bribe.');
+  const merchant = requestTarget(g, action.target);
   if (!merchant) throw Error('Choose an unresolved packet.');
   assertCurrentOffer(merchant, action);
+  if (g.phase !== 'inspect') { agreeEarlyPassage(g, inspector, merchant, merchant.bag?.bribe ?? merchant.bribeOffer ?? 0); return; }
   const pending = g.pendingInspection;
   if (pending) {
     if (pending.target !== merchant.id || pending.inspector !== inspector.id) throw Error('Resolve the current decision first.');
@@ -408,7 +478,7 @@ function chargeHector(g, inspector, merchant) {
   const marks = (g.hectorMarks || []).filter(mark => mark.hector === merchant.id && mark.agent === inspector.id && mark.round === g.round);
   if (!marks.length) return;
   merchant.bag.hectorCharged = true;
-  payment(inspector, merchant, marks.length * 5);
+  inspectionPayment(merchant, inspector, merchant, marks.length * 5, 'Salamanca Money');
   note(g, `${inspector.name} owes Hector €${marks.length * 5} for choosing to inspect his marked packet. Normal inspection payments still apply.`);
 }
 function finishInspections(g) {
@@ -442,7 +512,7 @@ function resolveNewestPending(g, p, action) {
   if (pending.stage === 'badger-response' && ['badger-use', 'badger-skip'].includes(action.type)) {
     if (action.type === 'badger-use') {
       if (p.character !== 'peteBadger' || p.badgerUsed || p.coins < pending.amount + 10) throw Error('Badger needs enough coins to pay the full inspection fine plus €10.');
-      p.coins -= 10; p.badgerUsed = true; p.bag.abilityClaim = 'badger';
+      p.coins -= 10; inspectionReceipt(p, p, null, 10, 10, 'Badger bank fee'); p.badgerUsed = true; p.bag.abilityClaim = 'badger';
       pending.outcome.delivered = [...p.bag.cards]; pending.outcome.discard = [];
       pending.outcome.result.message += ' Badger paid €10 to the bank to keep every packet card; the normal fine still applies.';
     }
@@ -458,13 +528,47 @@ function applyJudgement(g, light, merchant) {
   if (nextRound) {
     g.protections.push({ lightId: light.id, agentId: merchant.id, round: nextRound });
     note(g, `Kira’s Judgement: ${merchant.name} cannot inspect ${light.name} in round ${nextRound}.`);
-  } else { light.coins += 20; note(g, `Kira’s Judgement: ${light.name} took €20 from the bank; ${merchant.name} has no D.E.A. turns remaining.`); }
+  } else { light.coins += 20; inspectionReceipt(merchant, null, light, 20, 20, 'Kira bank reward', true); note(g, `Kira’s Judgement: ${light.name} took €20 from the bank; ${merchant.name} has no D.E.A. turns remaining.`); }
 }
-function applyAction(g, actor, action) {
+function applyAction(g, actor, action, bypassAndrew = false) {
   if (!action || typeof action.type !== 'string') throw Error('Invalid action.');
   const p = g.players.find(p => p.id === actor);
   if (!p) throw Error('You are not at this table.');
   const isDea = g.players[g.dea].id === actor;
+  if (action.type === 'andrew-awaken') {
+    if (p.character !== 'andrew' || ['lobby', 'finished'].includes(g.phase)) throw Error('This mystery is unavailable.');
+    if (!p.godAndrew) { p.godAndrew = true; note(g, `${p.name} became God Andrew.`); }
+    return;
+  }
+  if (action.type === 'andrew-change' || action.type === 'andrew-skip') {
+    const pending = g.pendingInspection;
+    if (!pending || !['andrew-before', 'andrew-after'].includes(pending.stage) || pending.target !== actor || p.character !== 'andrew' || !p.godAndrew) throw Error('This is not your card-change window.');
+    const current = pending.stage === 'andrew-before' ? p.bag.cards : pending.returnCards;
+    const cards = action.type === 'andrew-skip' ? [...current] : action.cards;
+    if (!Array.isArray(cards) || cards.length !== current.length || cards.some(key => typeof key !== 'string' || !Object.hasOwn(GOODS, key))) throw Error('Choose one valid card for every existing card.');
+    if (pending.stage === 'andrew-before') {
+      p.bag.cards = [...cards];
+      g.pendingInspection = pending.continuation.pending;
+      applyAction(g, pending.continuation.actor, pending.continuation.action, true);
+    } else {
+      p.stall.push(...cards); g.pendingInspection = null;
+      resolveEnvelope(g, p, pending.outcome.result, [...cards], true);
+    }
+    return;
+  }
+  if (!bypassAndrew && ['inspect', 'kira', 'fring', 'zach', 'junior', 'timothy', 'l-inspect'].includes(action.type)) {
+    const target = g.players.find(other => other.id === (action.target || g.pendingInspection?.target));
+    if (target?.character === 'andrew' && target.godAndrew && target.bag && !target.bag.resolved && !target.bag.andrewInspected) {
+      // Validate the committed inspection against an isolated state before pausing.
+      applyAction(structuredClone(g), actor, action, true);
+      target.bag.andrewInspected = true;
+      const previous = structuredClone(g.pendingInspection);
+      g.pendingInspection = { stage: 'andrew-before', target: target.id, inspector: action.type === 'timothy' ? g.players[g.dea].id : actor, continuation: { actor, action: structuredClone(action), pending: previous } };
+      note(g, `${p.name} committed to inspecting ${target.name}’s packet.`);
+      return;
+    }
+  }
+
   if (action.type === 'chat') {
     if (typeof action.text !== 'string' || !action.text.trim()) return;
     g.chat.push({ name: p.name, text: action.text.trim().slice(0, 240) });
@@ -504,7 +608,7 @@ function applyAction(g, actor, action) {
     const replacements = picks.map(i => g.discard[i]);
     g.discard = g.discard.filter((_, i) => !picks.includes(i)); take(p, action.indices); g.discard.push(...cards); p.hand.push(...replacements); useAbility(p);
     const intel = g.marketDraws[p.id] || []; g.marketDraws[p.id] = intel.concat(replacements).slice(0, 2);
-    note(g, `${p.name} used Dumpster Dive to privately exchange three hand cards with the discard pile.`); return;
+    note(g, `${p.name} used Dumpster Dive and discarded ${cards.length} cards: ${publicCards(cards)}. The three discard-pile picks remain private.`); return;
   }
   if (action.type === 'hector') {
     if (g.phase !== 'inspect' || !isDea || p.character !== 'hector' || !abilityRemaining(p) || g.pendingInspection) throw Error('Hector may mark and return a packet while holding the badge, twice per game.');
@@ -529,14 +633,17 @@ function applyAction(g, actor, action) {
     const drawn = [];
     for (let i = 0; i < discardCrowbars; i++) { g.discard.splice(g.discard.indexOf('crowbar'), 1); p.hand.push('crowbar'); drawn.push('crowbar'); }
     drawn.push(...draw(g, p, cards.length - discardCrowbars));
-    g.marketDraws[p.id] = (g.marketDraws[p.id] || []).concat(drawn).slice(0, 2); p.ready = true; finishMarket(g); return;
+    g.marketDraws[p.id] = (g.marketDraws[p.id] || []).concat(drawn).slice(0, 2);
+    note(g, cards.length ? `${p.name} discarded ${cards.length} card(s): ${publicCards(cards)}; drew ${drawn.length} replacement card(s)${discardCrowbars ? `, including ${discardCrowbars} discard crowbar(s)` : ''}. Deck draws stay private.` : `${p.name} kept their hand without exchanging cards.`);
+    p.ready = true; finishMarket(g); return;
   }
   if (action.type === 'pack') {
     if (g.phase !== 'pack' || isDea || p.ready) throw Error('You cannot load an envelope now.');
     const cards = selection(p, action.indices, 1, 5);
     if (cards.filter(key => key === 'usedNeedle').length > 1) throw Error('Load at most one Used Needle in a packet.');
-    p.bag = { cards, declaration: null, count: cards.length, bribe: p.bribeOffer || 0, resolved: false };
+    p.bag = { cards, declaration: null, count: cards.length, bribe: p.bribeOffer || 0, deaRequest: p.deaRequest || null, resolved: false };
     take(p, action.indices); p.ready = true;
+    note(g, `${p.name} sealed an envelope with ${cards.length} card(s). Contents remain private.`);
     if (merchants(g).every(p => p.ready)) { g.phase = 'declare'; merchants(g).forEach(p => p.ready = false); note(g, 'All envelopes are loaded. Make your declarations.'); }
     return;
   }
@@ -544,8 +651,10 @@ function applyAction(g, actor, action) {
     if (g.phase !== 'declare' || isDea || p.ready || !p.bag) throw Error('You cannot declare an envelope now.');
     if (challengeActor(g)) throw Error('Wait for Shinomiya to choose a contest or skip it this round.');
     if (!legalGoodsFor(p, g).includes(action.declaration)) throw Error('Declare one of your legal goods.');
-    if (!Number.isInteger(action.bribe) || action.bribe < 0 || action.bribe > p.coins) throw Error('Your bribe must fit your coin purse.');
-    p.bag.declaration = action.declaration; p.bag.declaredCards = [...p.bag.cards]; p.bag.declaredHonest = p.bag.cards.every(key => matchesDeclaration(p, key, g)); p.bag.bribe = action.bribe; p.bribeOffer = action.bribe; p.ready = true;
+    const amount = p.paidPassage?.amount ?? action.bribe;
+    if (!Number.isInteger(amount) || amount < 0 || (!p.paidPassage && amount > p.coins)) throw Error('Your bribe must fit your coin purse.');
+    p.bag.declaration = action.declaration; p.bag.declaredCards = [...p.bag.cards]; p.bag.declaredHonest = p.bag.cards.every(key => matchesDeclaration(p, key, g)); p.bag.bribe = amount; p.bribeOffer = amount; p.ready = true;
+    note(g, `${p.name} declared ${p.bag.count} ${GOODS[action.declaration].name} card(s)${p.paidPassage ? '; passage already paid' : ` and offered €${amount}`}.`);
     if (merchants(g).every(p => p.ready)) { g.phase = 'inspect'; note(g, 'All declarations are in. Time to bargain with the D.E.A.'); }
     return;
   }
@@ -560,7 +669,9 @@ function applyAction(g, actor, action) {
   }
   if (action.type === 'bribe') {
     if (!['market', 'pack', 'declare', 'inspect'].includes(g.phase) || isDea || p.bag?.resolved) throw Error('Only an unresolved smuggler’s delivery can be negotiated.');
+    if (p.paidPassage) throw Error('Passage was already agreed and paid; finish loading and declaring your packet.');
     if (!Number.isInteger(action.amount) || action.amount < 0 || action.amount > p.coins) throw Error('Offer between 0 and your available coins.');
+    if (action.amount !== (p.bag?.bribe ?? p.bribeOffer ?? 0)) note(g, action.amount ? `${p.name} offered the D.E.A. a €${action.amount} bribe.` : `${p.name} revoked their bribe offer.`);
     p.bribeOffer = action.amount; if (p.bag) p.bag.bribe = action.amount; return;
   }
   if (['dahlia-remove', 'dahlia-skip', 'dahlia-inspect', 'dahlia-pass', 'mike-use', 'mike-skip', 'carl-steal', 'carl-frame', 'carl-skip'].includes(action.type)) return resolveFifthPending(g, p, action);
@@ -576,7 +687,7 @@ function applyAction(g, actor, action) {
     note(g, action.type === 'zach' ? `${p.name}: “What the fuck is this?”` : `${p.name}: “You’re a pussy!”`);
     const legalOnly = target.bag.cards.every(key => isLegalFor(target, key, g)), stolen = action.type === 'zach' && legalOnly;
     if (stolen) p.stall.push(...target.bag.cards); else target.stall.push(...target.bag.cards);
-    if (action.type === 'junior' && legalOnly) p.coins += 8;
+    if (action.type === 'junior' && legalOnly) { p.coins += 8; inspectionReceipt(target, null, p, 8, 8, 'Junior bank bonus', true); }
     const message = stolen ? 'Zach stole the entirely legal envelope. No ordinary fines or bribes.' : action.type === 'junior' && legalOnly ? 'All goods were legal. Junior earned €8 from the bank; the owner kept every card.' : 'An illegal card was present. The owner kept every card; no fines or bribes.';
     resolveEnvelope(g, target, { name: target.name, kind: stolen ? 'caught' : 'passed', message, cards: [...target.bag.cards] }, stolen ? [] : target.bag.cards); return;
   }
@@ -627,7 +738,7 @@ function applyAction(g, actor, action) {
     useAbility(p); target.bag.abilityClaim = 'fring'; g.pendingInspection = null; settleGuess(g, target);
     const illegal = target.bag.cards.filter(c => !isLegalFor(target, c, g)), legal = target.bag.cards.filter(c => isLegalFor(target, c, g));
     p.stall.push(...illegal); target.stall.push(...legal);
-    if (!illegal.length) payment(p, target, 3);
+    if (!illegal.length) inspectionPayment(target, p, target, 3, 'Fring compensation');
     resolveEnvelope(g, target, { name: target.name, kind: illegal.length ? 'caught' : 'honest', message: illegal.length ? `Fring stole ${illegal.length} illegal card(s). Legal goods were delivered; no inspection fines.` : 'All goods were legal. Fring paid €3; legal goods were delivered.', cards: [...target.bag.cards] }, legal);
     return;
   }
@@ -641,6 +752,7 @@ function applyAction(g, actor, action) {
       resolveEnvelope(g, merchant, { name: merchant.name, kind: 'passed', message: `Envelope passed. €${merchant.bag.bribe} paid to the D.E.A.`, cards: null }, merchant.bag.cards); return;
     }
     if (inspectionBlocked(g, actor, merchant.id)) throw Error('Kira’s Judgement protects this envelope during your D.E.A. turn. Let it pass instead.');
+    note(g, `${p.name} chose to inspect ${merchant.name}’s envelope.`);
     const kira = action.type === 'kira';
     if (kira) {
       if (p.character !== 'light' || p.abilityUsed) throw Error('Only Lawful Light can use Kira’s Judgement, once per game.');
@@ -684,7 +796,7 @@ function settleFinalAbilities(g) {
   g.finalAbilitiesSettled = true;
 }
 function ordinaryInspection(g, inspector, merchant, kira = false, allowDana = true, multiplier = 1) {
-  merchant.bag.deaRequest = null;
+  merchant.bag.deaRequest = null; merchant.deaRequest = null;
   merchant.bag.actualInspector = inspector.id;
   payNeedleInspection(g, inspector, merchant);
   chargeHector(g, inspector, merchant);
@@ -708,6 +820,7 @@ function ordinaryInspection(g, inspector, merchant, kira = false, allowDana = tr
     const fee = (legalFine + (merchant.character === 'tuco' ? Math.floor(illegalFine * 1.5) : illegalFine * (doubled ? 2 : 1))) * multiplier;
     outcome = { payer: merchant.id, payee: inspector.id, amount: fee, delivered: cards.filter(c => matchesDeclaration(merchant, c, g)), discard: lies, result: { name: merchant.name, kind: 'caught', message: `Caught bluffing! ${lies.length} seized; €${fee} owed${doubled ? ' (illegal-card fines doubled for Katagiri)' : multiplier === 2 ? ` (${doubleLabel} doubles the fine)` : ''}.`, cards: [...cards] } };
   }
+  outcome.result.honest = !lies.length;
   if (inspector.character === 'mike' && outcome.result.kind === 'honest' && !inspector.mikeWaived) {
     inspector.mikeWaived = true; outcome.amount = 0; outcome.result.message = 'Honest packet delivered. Mike’s first honest-inspection compensation is waived.';
   }
@@ -757,11 +870,14 @@ function completeOutcome(g, inspector, merchant, outcome, fromBank) {
     payment(payer, pot, outcome.amount); const half = Math.floor(pot.coins / 2); rat.coins += half; payee.coins += pot.coins - half;
     let ratValue = half, agentValue = pot.coins - half;
     for (const key of pot.stall) { const recipient = ratValue < agentValue ? rat : payee; recipient.stall.push(key); if (recipient === rat) ratValue += GOODS[key].value; else agentValue += GOODS[key].value; }
-  } else payment(payer, payee, outcome.amount);
-  if (outcome.rat) { const rat = g.players.find(p => p.id === outcome.rat); if (fromBank) { const half = Math.floor(outcome.amount / 2); payee.coins -= half; rat.coins += half; } rat.coins += 12; }
-  if (outcome.secondary) payment(g.players.find(p => p.id === outcome.secondary.payer), g.players.find(p => p.id === outcome.secondary.payee), outcome.secondary.amount);
+    inspectionReceipt(merchant, payer, payee, Math.ceil(outcome.amount / 2), agentValue, 'Inspection fine share', false, pot.coins - half);
+    inspectionReceipt(merchant, payer, rat, Math.floor(outcome.amount / 2), ratValue, 'Timothy fine share', false, half);
+  } else inspectionPayment(merchant, payer, payee, outcome.amount, outcome.result.kind === 'honest' ? 'Honest compensation' : 'Inspection payment');
+  if (fromBank && !outcome.rat) inspectionReceipt(merchant, payer, payee, outcome.amount, outcome.amount, 'Vault Venture', true);
+  if (outcome.rat) { const rat = g.players.find(p => p.id === outcome.rat); if (fromBank) { const half = Math.floor(outcome.amount / 2); payee.coins -= half; rat.coins += half; inspectionReceipt(merchant, payer, payee, outcome.amount - half, outcome.amount - half, 'Vault Venture fine share', true); inspectionReceipt(merchant, payer, rat, half, half, 'Vault Venture fine share', true); } rat.coins += 12; inspectionReceipt(merchant, null, rat, 12, 12, 'Rat’s Gambit bank reward', true); }
+  if (outcome.secondary) inspectionPayment(merchant, g.players.find(p => p.id === outcome.secondary.payer), g.players.find(p => p.id === outcome.secondary.payee), outcome.secondary.amount, 'Timothy compensation share');
   merchant.hand.push(...(outcome.returned || [])); inspector.stall.push(...(outcome.stolen || []));
-  if (merchant.character === 'trump' && outcome.result.kind === 'honest' && merchant.bag.count >= 3) { merchant.coins += 3; note(g, `${merchant.name} received €3 from the bank for an honest inspected packet of 3+ cards.`); }
+  if (merchant.character === 'trump' && outcome.result.kind === 'honest' && merchant.bag.count >= 3) { merchant.coins += 3; inspectionReceipt(merchant, null, merchant, 3, 3, 'Trump bank bonus', true); note(g, `${merchant.name} received €3 from the bank for an honest inspected packet of 3+ cards.`); }
   merchant.stall.push(...outcome.delivered); discardCards(g, outcome.discard);
   if (fromBank) outcome.result.message += ' Vault Venture covered the payment.';
   resolveEnvelope(g, merchant, outcome.result, outcome.delivered);
@@ -858,6 +974,7 @@ function resolveExtraPending(g, p, action) {
     if (pending.stage !== 'dana-response' || p !== target || !abilityRemaining(p)) throw Error('Only Dana can select a pair while Split Decision is available.');
     const indices = action.indices;
     if (!Array.isArray(indices) || indices.length !== 2 || new Set(indices).size !== 2 || indices.some(i => !Number.isInteger(i) || i < 0 || i >= target.bag.cards.length || isLegalFor(target, target.bag.cards[i], g))) throw Error('Select exactly two distinct illegal cards from this envelope.');
+    note(g, `${p.name} activated Split Decision on ${publicCards(indices.map(i => target.bag.cards[i]))}.`);
     useAbility(p); target.bag.abilityClaim = 'dana'; pending.stage = 'dana-choice'; pending.pair = [...indices]; return;
   }
   if (action.type === 'dana-choose') {
@@ -865,8 +982,8 @@ function resolveExtraPending(g, p, action) {
     const cards = target.bag.cards, taken = cards[action.index], retained = cards[pending.pair.find(i => i !== action.index)];
     const rest = cards.filter((_, i) => !pending.pair.includes(i)), delivered = [retained, ...rest.filter(c => matchesDeclaration(target, c, g))];
     const confiscated = rest.filter(c => !matchesDeclaration(target, c, g)), fine = confiscated.reduce((sum, c) => sum + penaltyFor(target, c, g), 0);
-    payment(target, inspector, fine); inspector.stall.push(taken); target.stall.push(...delivered); discardCards(g, confiscated);
-    const bonus = GOODS[taken].value > GOODS[retained].value ? 4 : 0; target.coins += bonus;
+    inspectionPayment(target, target, inspector, fine, 'Remaining Split Decision fine'); inspector.stall.push(taken); target.stall.push(...delivered); discardCards(g, confiscated);
+    const bonus = GOODS[taken].value > GOODS[retained].value ? 4 : 0; target.coins += bonus; if (bonus) inspectionReceipt(target, null, target, bonus, bonus, 'Split Decision bank bonus', true);
     g.pendingInspection = null;
     resolveEnvelope(g, target, { name: target.name, kind: 'caught', message: `Split Decision: inspector kept ${GOODS[taken].name}; Dana kept ${GOODS[retained].name}. Remaining fines: €${fine}.${bonus ? ' Dana earned €4 from the bank.' : ''}`, cards: [...cards] }, delivered); return;
   }
@@ -898,7 +1015,7 @@ function recordAnalyticsAction(g, actor, action, before) {
 export function act(g, actor, action) {
   expireAbilities(g);
   const before = analyticsBefore(g, actor);
-  applyAction(g, actor, action); updateCollections(g); clearInvalidRequests(g); syncTriggerDeadline(g);
+  applyAction(g, actor, action); updateCollections(g); settlePaidPassages(g); clearInvalidRequests(g); syncTriggerDeadline(g);
   recordAnalyticsAction(g, actor, action, before);
 }
 export function majorityCount(cards, key) {
@@ -926,7 +1043,7 @@ export function scores(g) {
 export function viewFor(g, viewer) {
   const final = g.phase === 'finished';
   const pending = structuredClone(g.pendingInspection);
-  if (pending) { delete pending.outcome; if (viewer !== pending.target) delete pending.removedIndices; }
+  if (pending) { delete pending.outcome; delete pending.continuation; if (viewer !== pending.target) delete pending.returnCards; if (viewer !== pending.target) delete pending.removedIndices; }
   if (pending?.stage === 'dahlia-choice' && viewer === pending.target) pending.removedCards = pending.removedIndices.map(i => g.players.find(p => p.id === pending.target).bag.cards[i]);
   if (pending?.stage === 'l-review') {
     delete pending.sampledIndices;
@@ -938,13 +1055,14 @@ export function viewFor(g, viewer) {
   const viewerPlayer = g.players.find(p => p.id === viewer), dea = g.players[g.dea];
 
   return {
+    godIntel: viewerPlayer?.character === 'andrew' && viewerPlayer.godAndrew && dea.id === viewer && !['lobby', 'finished'].includes(g.phase) ? g.players.filter(p => p.id !== viewer).map(p => ({ id: p.id, hand: [...p.hand], packet: p.bag && !p.bag.resolved ? [...p.bag.cards] : [], stall: [...p.stall] })) : null,
     hostId: g.hostId, phase: g.phase, round: g.round, dea: g.dea, totalRounds: totalRounds(g),
-    log: [...g.log], chat: structuredClone(g.chat), results: structuredClone(g.results), revision: g.revision,
+    log: [...g.log], publicActions: structuredClone(g.publicActions || []), chat: structuredClone(g.chat), results: structuredClone(g.results), revision: g.revision,
     scores: final ? scores(g) : null,
     serverNow: Date.now(), piperOffers: structuredClone(g.piperOffers || []), cardTotal: g.cardTotal || CATALOG_SIZE, retiredCount: g.retired?.length || 0, pendingInspection: pending, rickDiscard: viewerPlayer?.character === 'rick' && g.phase === 'market' && !viewerPlayer.abilityUsed ? [...g.discard] : null, hectorMarks: structuredClone(g.hectorMarks || []), discardCrowbars: viewerPlayer?.character === 'benny' ? g.discard.filter(c => c === 'crowbar').length : null, marketIntel: dea.character === 'hank' && dea.id === viewer && dea.surveillanceRound === g.round ? structuredClone(g.marketDraws) : null, contest: structuredClone(g.contest), protections: structuredClone(g.protections), challengeActor: challengeActor(g),
     players: g.players.map(p => ({
       id: p.id, name: p.name, bot: p.bot, online: p.online, coins: p.coins, ready: p.ready,
-      character: p.character, abilityUsed: p.abilityUsed, abilityUses: p.abilityUses, abilityRemaining: abilityRemaining(p), bonusCards: p.id === viewer && p.character === 'wendy' ? [...p.bonusDraws] : null, surveillanceDecided: p.hankDecisionRound === g.round, surveillanceActive: p.surveillanceRound === g.round, crowbarCollection: p.id === viewer && p.character === 'benny' ? p.stall.filter(c => c === 'crowbar').length : null, carlStole: !!p.carlStole, carlFramed: !!p.carlFramed, mikeWaived: !!p.mikeWaived, bribeOffer: p.bag?.bribe ?? p.bribeOffer ?? 0, peteUsed: !!p.peteUsed, badgerUsed: !!p.badgerUsed, raughnInspection: dea.character === 'raughn', legalGoods: legalGoodsFor(p, g), crowbarsUnlocked: !!p.crowbarsUnlocked, collectionComplete: p.collectionComplete, collection: p.id === viewer && p.character === 'katagiri' ? collectionProgress(p) : null,
+      deaRequest: structuredClone(p.deaRequest || p.bag?.deaRequest || null), paidPassage: structuredClone(p.paidPassage || null), character: p.character, godAndrew: p.character === 'andrew' && !!p.godAndrew, abilityUsed: p.abilityUsed, abilityUses: p.abilityUses, abilityRemaining: abilityRemaining(p), bonusCards: p.id === viewer && p.character === 'wendy' ? [...p.bonusDraws] : null, surveillanceDecided: p.hankDecisionRound === g.round, surveillanceActive: p.surveillanceRound === g.round, crowbarCollection: p.id === viewer && p.character === 'benny' ? p.stall.filter(c => c === 'crowbar').length : null, carlStole: !!p.carlStole, carlFramed: !!p.carlFramed, mikeWaived: !!p.mikeWaived, bribeOffer: p.bag?.bribe ?? p.bribeOffer ?? 0, peteUsed: !!p.peteUsed, badgerUsed: !!p.badgerUsed, raughnInspection: dea.character === 'raughn', legalGoods: legalGoodsFor(p, g), crowbarsUnlocked: !!p.crowbarsUnlocked, collectionComplete: p.collectionComplete, collection: p.id === viewer && p.character === 'katagiri' ? collectionProgress(p) : null,
       hand: p.id === viewer ? [...p.hand] : null, handCount: p.hand.length,
       stall: p.stall.filter(c => final || p.id === viewer || isLegalFor(p, c)),
       contrabandCount: p.stall.filter(c => !isLegalFor(p, c)).length,
@@ -957,9 +1075,10 @@ export function botAction(g, id) {
   if (!p?.bot) return null;
   const opportunity = g.piperOffers?.find(offer => offer.piper === id);
   if (opportunity) return { type: 'piper-use', offer: opportunity.id };
-  if (p.bag?.deaRequest && !p.bag.resolved && (!g.pendingInspection || (g.pendingInspection.target === id && NEGOTIABLE_STAGES.includes(g.pendingInspection.stage)))) return { type: p.coins >= p.bag.deaRequest.amount ? 'accept-request' : 'decline-request', request: p.bag.deaRequest.id };
+  if ((p.deaRequest || p.bag?.deaRequest) && !p.paidPassage && !p.bag?.resolved && (!g.pendingInspection || (g.pendingInspection.target === id && NEGOTIABLE_STAGES.includes(g.pendingInspection.stage)))) return { type: p.coins >= (p.deaRequest || p.bag.deaRequest).amount ? 'accept-request' : 'decline-request', request: (p.deaRequest || p.bag.deaRequest).id };
   if (g.pendingInspection) {
     const pending = g.pendingInspection;
+    if (['andrew-before', 'andrew-after'].includes(pending.stage) && pending.target === id) return { type: 'andrew-skip' };
     if (pending.stage === 'dahlia-response' && pending.target === id) { const indices = p.bag.cards.map((c, i) => c !== p.bag.declaration ? i : -1).filter(i => i >= 0).slice(0, Math.min(4, p.bag.cards.length - 1)); return indices.length ? { type: 'dahlia-remove', indices } : { type: 'dahlia-skip' }; }
     if (pending.stage === 'dahlia-choice' && pending.inspector === id) return { type: Math.random() < .5 ? 'dahlia-inspect' : 'dahlia-pass' };
     if (pending.stage === 'mike-response' && pending.inspector === id) return { type: 'mike-use' };

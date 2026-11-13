@@ -16,7 +16,7 @@ function inspecting(roles) {
 
 test('all twenty-nine character boards can be claimed in the lobby, including the new five', () => {
   const g = createGame('host', 'Host');
-  assert.equal(Object.keys(CHARACTERS).length, 29);
+  assert.equal(Object.keys(CHARACTERS).length, 30);
   for (const character of Object.keys(CHARACTERS)) {
     act(g, 'host', { type: 'choose-character', character }); assert.equal(g.players[0].character, character);
   }

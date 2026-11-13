@@ -30,7 +30,7 @@ test('characters are unique, private choices cannot be changed by other players,
 });
 test('random assignment fills five unique seats from the twenty-nine-board pool', () => {
   const g = createGame('p0', 'Host'); for (let i = 1; i < 5; i++) addPlayer(g, `p${i}`, `P${i}`);
-  startGame(g, 'p0'); assert.equal(Object.keys(CHARACTERS).length, 29);
+  startGame(g, 'p0'); assert.equal(Object.keys(CHARACTERS).length, 30);
   assert.equal(new Set(g.players.map(p => p.character)).size, 5);
   assert.ok(g.players.every(p => Object.hasOwn(CHARACTERS, p.character)));
 });

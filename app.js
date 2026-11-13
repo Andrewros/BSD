@@ -20,6 +20,9 @@ let rickSelected = new Set(), rickPileKey = '', petePacket = 0, peteHand = 0;
 let dahliaSelected = new Set();
 const guessDrafts = new Map();
 const requestDrafts = new Map();
+let inspectionQueue = [], activeInspectionResult = null, inspectionMode = null, inspectionMarkup = '';
+const seenInspectionResults = new Set(), dismissedInspectionWindows = new Set();
+let publicLogExpanded = false, publicLogRound = '', publicLogSearch = '';
 const botNames = ['The Baker', 'Fishy Business', 'Rare Medium', 'Corky'];
 const phaseNames = { lobby: 'The gathering', market: 'Market', pack: 'Load envelope', declare: 'Declaration', inspect: 'Inspection', results: 'End of round', finished: 'Final standings' };
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 4500); }
@@ -30,8 +33,9 @@ function header() {
 function home() {
   return `${header()}<main class="home"><div class="hero"><section class="hero-copy"><div class="eyebrow"><span class="little-line"></span> NOTHING TO DECLARE. PROBABLY.</div><h1>Better Smug<br><em>Drug.</em></h1><p class="hero-description">Bread. Fish. A little contraband.<br>Absolutely nothing suspicious.</p><p class="hero-detail">Load your envelope. Bluff the D.E.A. Turn an innocent delivery into a very questionable fortune.</p><div class="hero-meta"><span><i>♙</i> 3–5 players</span><span><i>◷</i> 20–40 minutes</span><span><i>⌁</i> Play in browser</span></div><div class="hero-art-caption"><span>222 CARDS. ONE VERY NOSY AGENT.</span><span>YOUR HOMEMADE GAME, ONLINE.</span></div></section><section class="entry-panel" aria-labelledby="entry-title"><div class="panel-flourish">✦</div><span class="eyebrow">A SEAT AT THE TABLE</span><h2 id="entry-title">The market awaits.</h2><p>Bring your friends. Leave your honesty at home.</p><form id="room-form"><label for="merchant-name">YOUR NAME AT THE TABLE</label><div class="input-wrap"><span aria-hidden="true">♙</span><input id="merchant-name" name="name" placeholder="e.g. Definitely Just Bread" maxlength="18" autocomplete="nickname" value="${escape(name)}" required></div><button class="primary-button wide" type="submit" data-intent="host" ${busy ? 'disabled' : ''}>${busy ? '<span class="spinner"></span> Connecting…' : 'Create a table <span>↗</span>'}</button><div class="or-divider"><span>OR JOIN YOUR FRIENDS</span></div><label for="room-code">ROOM CODE</label><div class="join-row"><input id="room-code" name="code" placeholder="ABC123" value="${escape(code)}" maxlength="6" autocomplete="off" spellcheck="false"><button class="secondary-button" type="submit" data-intent="join" ${busy ? 'disabled' : ''}>Join table <span>→</span></button></div></form><p class="analytics-notice">${analyticsNotice}</p>${lastError ? `<p class="connection-error" role="alert">${escape(lastError)}</p>` : ''}<p class="entry-note"><span class="status-dot"></span> No downloads. No accounts. Just a good bluff.</p><button class="practice-link" data-action="demo">Just looking? Try a practice game <span>→</span></button></section></div><section class="how-strip"><div class="strip-heading"><span class="eyebrow">THE ART OF GETTING AWAY WITH IT</span><h3>Everyone has a little to hide.</h3></div><div class="mini-step"><span class="step-number">01</span><div><h4>Pack your goods</h4><p>A little bread. A suspicious phone.</p></div></div><div class="mini-step"><span class="step-number">02</span><div><h4>Make your case</h4><p>A straight face goes a long way.</p></div></div><div class="mini-step"><span class="step-number">03</span><div><h4>Pay your price</h4><p>Every envelope has a story. Sell yours.</p></div></div></section></main><footer><span>${crest()} BETTER SMUG DRUG · THE ONLINE TABLE</span><span>Made for good company & questionable deals.</span><button data-action="rules">The rules of the road ↗</button></footer>`;
 }
-function portrait(key, extra = '') { return `<span class="character-portrait portrait-${key} ${extra}" role="img" aria-label="${CHARACTERS[key].name}" style="background-image:url('./assets/characters/${key}.jpg')"></span>`; }
+function portrait(key, extra = '', god = false) { return `<span class="character-portrait portrait-${key} ${extra}" role="img" aria-label="${god ? 'God Andrew' : CHARACTERS[key].name}" style="background-image:url('./assets/characters/${god ? 'andrewGod.png' : `${key}.jpg`}')"></span>`; }
 function characterStatus(p) {
+  if (p.character === 'andrew') return p.godAndrew ? 'GOD ANDREW' : 'MYSTERY';
   if (p.character === 'katagiri') return p.collectionComplete ? 'SET COMPLETE' : 'PASSIVE';
   if (['wendy', 'raughn', 'steve', 'pinkman', 'nile', 'tuco'].includes(p.character)) return 'PASSIVE';
   if (p.character === 'carl') return `STEAL ${p.carlStole ? 'USED' : 'READY'} · FRAME ${p.carlFramed ? 'USED' : 'READY'}`;
@@ -46,7 +50,7 @@ function characterStatus(p) {
 }
 function characterSeat(p) {
   const character = CHARACTERS[p.character];
-  if (state.phase !== 'lobby') return character ? `<div class="character-strip"><span>${character.name}</span><b>${characterStatus(p)}</b></div>` : '';
+  if (state.phase !== 'lobby') return character ? `<div class="character-strip"><span>${p.godAndrew ? 'God Andrew' : character.name}</span><b>${characterStatus(p)}</b></div>` : '';
   const editable = p.id === selfId || (isHost() && p.bot);
   return `<div class="character-choice">${editable ? `<label for="character-${p.id}">CHARACTER</label><select id="character-${p.id}" data-character-player="${p.id}"><option value="">Random at start</option>${Object.entries(CHARACTERS).map(([key, c]) => { const owner = state.players.find(other => other.id !== p.id && other.character === key); return `<option value="${key}" ${p.character === key ? 'selected' : ''} ${owner ? 'disabled' : ''}>${c.name}${owner ? ` · Taken by ${escape(owner.name)}` : ''}</option>`; }).join('')}</select>` : `<span class="eyebrow">${character?.name || 'RANDOM AT START'}</span>`}${character ? `<p>${character.ability} · ${character.timing}</p>` : ''}</div>`;
 }
@@ -65,6 +69,7 @@ function abilityPanel() {
   if (state.phase === 'market' && p.character === 'hank' && state.players[state.dea].id === p.id && !p.surveillanceDecided) controls = `<div class="ability-controls"><div class="response-actions"><button class="ability-button" data-action="surveil">Activate surveillance</button><button class="secondary-button" data-action="skip-surveillance">Skip surveillance this round</button></div><span class="action-hint">See the first two replacement draws per smuggler privately. Market waits for this choice.</span></div>`;
   if (state.phase === 'market' && p.character === 'rick' && !p.abilityUsed) controls = `<div class="ability-controls"><span class="eyebrow">DUMPSTER DIVE · PRIVATE DISCARD CHOICES</span><p>Select exactly three hand cards below and three discard cards here. This is separate from your ordinary exchange; use it while the market is still open.</p>${state.players[state.dea].id === p.id || p.ready ? `<div class="evidence-grid">${p.hand.map((key, i) => evidenceCard(key, i, 'rick-hand', selected.has(i))).join('')}</div>` : ''}<div class="evidence-grid discard-picker">${(state.rickDiscard || []).map((key, i) => evidenceCard(key, i, 'rick-card', rickSelected.has(i))).join('') || '<p>The discard pile is empty.</p>'}</div><button class="ability-button" data-action="rick" ${selected.size === 3 && rickSelected.size === 3 ? '' : 'disabled'}>Dumpster Dive · Swap 3 hand / 3 discard</button><p>${selected.size}/3 hand cards · ${rickSelected.size}/3 discard cards selected. Other players cannot see your choices.</p></div>`;
   if (state.players[state.dea].character === 'raughn') controls += '<p class="ability-footnote">Room Inspection: Wine is illegal this round and cannot be declared. Illegal-card fines increase by €2; Wendy’s ordinary Meth exemption still applies.</p>';
+  if (p.godAndrew && state.godIntel) controls += `<div class="private-intel"><span class="eyebrow">PRIVATE · GOD ANDREW</span>${state.godIntel.map(intel => `<details><summary>See ${escape(state.players.find(other => other.id === intel.id)?.name)}’s cards</summary>${['hand', 'packet', 'stall'].map(area => `<h4>${area === 'packet' ? 'Sealed packet' : area === 'stall' ? 'Stash' : 'Hand'}</h4><div class="evidence-grid">${intel[area].map((key, i) => evidenceCard(key, i)).join('') || '<p>No cards.</p>'}</div>`).join('')}</details>`).join('')}</div>`;
   const bennyProgress = p.character === 'benny' ? `<div class="collection-progress"><span class="${p.crowbarsUnlocked ? 'collected' : ''}">${symbol('crowbar')} ${p.crowbarCollection} crowbars in stash · ${p.crowbarsUnlocked ? 'LEGAL CROWBARS UNLOCKED' : 'Need 3 to unlock'}</span></div>` : '';
   const intel = p.character === 'hank' && state.marketIntel ? `<div class="private-intel"><span class="eyebrow">PRIVATE SURVEILLANCE · THIS ROUND ONLY</span>${Object.keys(state.marketIntel).length ? Object.entries(state.marketIntel).map(([id, cards]) => `<div><b>${escape(state.players.find(other => other.id === id)?.name)}</b><span>${cards.length ? cards.map(key => `${symbol(key)} ${GOODS[key].name}`).join(' · ') : 'Kept their hand; no cards drawn.'}</span></div>`).join('') : '<p>Waiting for smugglers to exchange cards…</p>'}</div>` : '';
   const wendyBonus = p.character === 'wendy' && p.bonusCards?.length ? `<div class="private-intel"><span class="eyebrow">YOUR PRIVATE BONUS DRAWS · THIS ROUND</span><div>${p.bonusCards.map(key => `<span>${symbol(key)} ${GOODS[key].name}</span>`).join('')}</div><p>These cards are already in your stash. They do not create further bonus draws.</p></div>` : '';
@@ -72,7 +77,7 @@ function abilityPanel() {
   const mikePassive = p.character === 'mike' ? `<p class="ability-footnote">First honest-inspection waiver: ${p.mikeWaived ? 'already used this game' : 'still available'}.</p>` : '';
   const heisenbergPassive = p.character === 'heisenberg' ? '<p class="ability-footnote">Passive remains active: Meth scores €10; Blue Sky scores €13 while in your stash. Printed card values still apply to contests.</p>' : '';
   const collection = p.character === 'katagiri' ? `<div class="collection-progress">${[...LEGAL, 'illegal'].map(key => `<span class="${p.collection?.includes(key) ? 'collected' : ''}">${p.collection?.includes(key) ? '✓' : '○'} ${key === 'illegal' ? 'Any illegal' : GOODS[key].name}</span>`).join('')}</div><p class="ability-footnote">${p.collectionComplete ? 'Set completed. Illegal fines stay normal and your end-game reward is unlocked.' : 'Complete all five categories to stop doubled illegal fines and unlock the end-game reward.'}</p>` : '';
-  return `<section class="personal-ability">${portrait(p.character)}<div class="ability-copy"><div class="ability-heading"><span class="eyebrow">${character.name}</span><span class="ability-status">${characterStatus(p)}</span></div><h2>${character.ability}</h2><p>${character.description}</p>${collection}${bennyProgress}${intel}${wendyBonus}${specialNote}${mikePassive}${heisenbergPassive}${controls}<button class="small-text-button" data-action="characters">All characters & interactions ↗</button></div></section>`;
+  return `<section class="personal-ability">${portrait(p.character, '', p.godAndrew)}<div class="ability-copy"><div class="ability-heading"><span class="eyebrow">${p.godAndrew ? 'God Andrew' : character.name}</span><span class="ability-status">${characterStatus(p)}</span></div><h2>${character.ability}</h2><p>${character.description}</p>${collection}${bennyProgress}${intel}${wendyBonus}${specialNote}${mikePassive}${heisenbergPassive}${controls}<button class="small-text-button" data-action="characters">All characters & interactions ↗</button></div></section>`;
 }
 function contestSummary() {
   const c = state.contest; if (!c) return '';
@@ -83,7 +88,7 @@ function playerTile(p, i) {
   const dea = i === state.dea && state.phase !== 'lobby';
   const mine = p.id === selfId;
   const goods = LEGAL.map(k => `<span title="${GOODS[k].name}">${symbol(k)} <b>${majorityCount(p.stall, k)}</b></span>`).join('');
-  return `<article class="player-tile ${mine ? 'is-you' : ''} ${dea ? 'is-dea' : ''}"><div class="player-heading"><span class="avatar color-${i}">${dea ? '<img class="agent-badge" src="./assets/crest.svg" alt="D.E.A. agent badge">' : p.character ? portrait(p.character) : escape(p.name.charAt(0).toUpperCase())}</span><div><h3>${escape(p.name)} ${mine ? '<small>YOU</small>' : ''}</h3><span class="player-role">${dea ? 'D.E.A. AGENT' : p.bot ? 'PRACTICE BOT' : p.online ? 'SMUGGLER' : 'DISCONNECTED'}</span></div><span class="coin-count"><span>€</span> ${p.coins}</span></div>${characterSeat(p)}${state.phase !== 'lobby' ? `<div class="stall-goods">${goods}${p.crowbarsUnlocked ? `<span title="Benny’s legal crowbars">${symbol('crowbar')} <b>${p.stall.filter(c => c === 'crowbar').length}</b></span>` : ''}<span title="Contraband delivered">🏴 <b>${p.contrabandCount}</b></span></div><div class="player-bottom"><span>${p.handCount} cards in hand</span><span>${dea ? '⚖ Keeping the peace' : p.bag?.resolved ? '✓ Envelope resolved' : p.bag ? '▣ Envelope sealed' : p.ready ? '✓ Ready' : 'Preparing…'}</span></div>` : `<div class="player-bottom"><span>${p.online ? '<span class="status-dot"></span> Ready at the table' : 'Waiting to reconnect'}</span>${isHost() && !mine ? `<button class="small-text-button" data-action="remove" data-id="${escape(p.id)}">Remove</button>` : ''}</div>`}</article>`;
+  return `<article class="player-tile ${mine ? 'is-you' : ''} ${dea ? 'is-dea' : ''}"><div class="player-heading"><span class="avatar color-${i}">${dea ? '<img class="agent-badge" src="./assets/crest.svg" alt="D.E.A. agent badge">' : p.character ? portrait(p.character, '', p.godAndrew) : escape(p.name.charAt(0).toUpperCase())}</span><div><h3>${escape(p.name)} ${mine ? '<small>YOU</small>' : ''}</h3><span class="player-role">${dea ? 'D.E.A. AGENT' : p.bot ? 'PRACTICE BOT' : p.online ? 'SMUGGLER' : 'DISCONNECTED'}</span></div><span class="coin-count"><span>€</span> ${p.coins}</span></div>${characterSeat(p)}${state.phase !== 'lobby' ? `<div class="stall-goods">${goods}${p.crowbarsUnlocked ? `<span title="Benny’s legal crowbars">${symbol('crowbar')} <b>${p.stall.filter(c => c === 'crowbar').length}</b></span>` : ''}<span title="Contraband delivered">🏴 <b>${p.contrabandCount}</b></span></div><div class="player-bottom"><span>${p.handCount} cards in hand</span><span>${dea ? '⚖ Keeping the peace' : p.bag?.resolved ? '✓ Envelope resolved' : p.bag ? '▣ Envelope sealed' : p.ready ? '✓ Ready' : 'Preparing…'}</span></div>` : `<div class="player-bottom"><span>${p.online ? '<span class="status-dot"></span> Ready at the table' : 'Waiting to reconnect'}</span>${isHost() && !mine ? `<button class="small-text-button" data-action="remove" data-id="${escape(p.id)}">Remove</button>` : ''}</div>`}</article>`;
 }
 function isHost() { return state?.hostId === selfId; }
 function me() { return state.players.find(p => p.id === selfId); }
@@ -121,10 +126,10 @@ function declarationPanel() {
   if (state.challengeActor) return waiting('A genius is considering a challenge.', state.challengeActor === selfId ? 'Choose a rival or skip this round using your ability controls above.' : `${escape(state.players.find(p => p.id === state.challengeActor).name)} must choose a contest or skip before declarations begin.`, '✦');
   if (dea) return waiting('Let’s hear those alibis.', 'Each smuggler must declare one legal good. The card count is always truthful.', '✦');
   if (p.ready) return waiting('Your story is on the record.', `You declared ${p.bag.count} ${escape(GOODS[p.bag.declaration].name.toLowerCase())}. Waiting for the other declarations.`, '✓');
-  return `<div class="action-copy"><span class="eyebrow">03 / DECLARATION</span><h2>Nothing to declare?</h2><p>Your sealed envelope contains ${p.bag.count} card${p.bag.count === 1 ? '' : 's'}. Claim they’re all one legal good.<br>Mixed cards are illegal, even when declared as the food they resemble.</p><div class="packing-options"><div><label for="declaration">${p.bag.count} CARD${p.bag.count === 1 ? '' : 'S'} OF</label><select id="declaration">${legalGoodsFor(p).map(k => `<option value="${k}" ${declaration === k ? 'selected' : ''}>${GOODS[k].icon} ${GOODS[k].name}</option>`).join('')}</select></div><div><label for="pack-bribe">OFFER FOR SAFE PASSAGE</label><div class="coin-input"><input id="pack-bribe" type="number" min="0" max="${p.coins}" value="${bribeDraft}" inputmode="numeric"><span>€</span></div></div></div><button class="primary-button" data-action="declare">Make my declaration <span>→</span></button></div>`;
+  return `<div class="action-copy"><span class="eyebrow">03 / DECLARATION</span><h2>Nothing to declare?</h2><p>Your sealed envelope contains ${p.bag.count} card${p.bag.count === 1 ? '' : 's'}. Claim they’re all one legal good.<br>Mixed cards are illegal, even when declared as the food they resemble.</p><div class="packing-options"><div><label for="declaration">${p.bag.count} CARD${p.bag.count === 1 ? '' : 'S'} OF</label><select id="declaration">${legalGoodsFor(p).map(k => `<option value="${k}" ${declaration === k ? 'selected' : ''}>${GOODS[k].icon} ${GOODS[k].name}</option>`).join('')}</select></div><div><label for="pack-bribe">OFFER FOR SAFE PASSAGE</label><div class="coin-input"><input id="pack-bribe" ${p.paidPassage ? 'disabled' : ''} type="number" min="0" max="${p.coins}" value="${bribeDraft}" inputmode="numeric"><span>€</span></div></div></div><button class="primary-button" data-action="declare">Make my declaration <span>→</span></button></div>`;
 }
 function inspectionPanel() {
-  if (state.pendingInspection) { const deadline = state.pendingInspection.expiresAt; return `<div ${deadline ? `class="trigger-window" data-trigger-deadline="${deadline}"` : ''}>${deadline ? countdown(deadline) : ''}${pendingInterventions()}${pendingInspectionPanel()}</div>`; }
+  if (state.pendingInspection) return `<div class="inspection-awaiting"><span class="eyebrow">INSPECTION IN PROGRESS</span><h2>A decision is pending.</h2><p>Open the inspection window to see the available evidence and ability choices. Sealed cards remain private until opened.</p><button class="primary-button" data-action="open-inspection">View inspection & choices</button></div>`;
   const p = me(), dea = state.players[state.dea].id === selfId;
   const bags = state.players.filter((_, i) => i !== state.dea);
   return `<div class="inspection-intro"><span class="eyebrow">04 / INSPECTION</span><h2>${dea ? 'Trust your instincts.<br>Or take the euros.' : 'A good story goes a long way.'}</h2><p>${dea ? 'Choose any envelope to inspect, or accept its offer for safe passage.' : `${escape(state.players[state.dea].name)} holds the badge. Make your case in table chat.`}</p></div><div class="bag-grid">${bags.map(smuggler => {
@@ -152,8 +157,52 @@ function evidenceCard(key, index, action = '', chosen = false) {
   const g = GOODS[key], tag = action ? 'button' : 'div';
   return `<${tag} class="evidence-card ${chosen ? 'selected' : ''}" ${action ? `data-action="${action}" data-index="${index}" aria-pressed="${chosen}"` : ''}>${symbol(key)}<b>${g.name}</b><span>€${g.value} value · €${g.penalty} fine</span>${action === 'dana-choose' ? '<small>TAKE THIS CARD</small>' : ''}</${tag}>`;
 }
+function inspectionWillShow() { return state?.pendingInspection ? !dismissedInspectionWindows.has(pendingInspectionKey()) : !!(activeInspectionResult || inspectionQueue.length); }
+function pendingInspectionKey() { const pending = state?.pendingInspection; return pending ? `${state.round}:${pending.stage}:${pending.target}` : ''; }
+function pendingInspectionMarkup() {
+  const deadline = state.pendingInspection.expiresAt;
+  return `<div ${deadline ? `class="trigger-window" data-trigger-deadline="${deadline}"` : ''}>${deadline ? countdown(deadline) : ''}${pendingInterventions()}${pendingInspectionPanel()}</div>`;
+}
+function inspectionPlayer(id) { return id === null ? 'Bank' : id === selfId ? 'You' : state.players.find(p => p.id === id)?.name || 'Player'; }
+function inspectionResultMarkup(result) {
+  const info = result.inspection, payments = info.payments.filter(p => p.amount > 0 || p.settled > 0);
+  const net = payments.reduce((total, p) => total + (p.payee === selfId ? p.settled : 0) - (p.payer === selfId && !p.bank ? p.settled : 0), 0);
+  const involved = payments.some(p => p.payer === selfId || p.payee === selfId);
+  const valueSuffix = payments.some(p => (p.payer === selfId || p.payee === selfId) && p.coins !== p.settled) ? ' in value' : '';
+  const headline = net > 0 ? `You receive €${net}${valueSuffix}` : net < 0 ? `You pay €${-net}${valueSuffix}` : !payments.length ? 'No inspection payment' : involved ? 'No net payment for you' : 'Payments settled';
+  const name = state.players.find(p => p.id === info.merchant)?.name || result.name;
+  return `<div class="inspection-verdict ${info.honest ? 'is-honest' : 'is-bluff'}"><span class="verdict-icon">${info.honest ? '✓' : '⚑'}</span><span class="eyebrow">ROUND ${info.round} · ${escape(name)}’S PACKET</span><h2>${info.honest ? 'Honest declaration.' : 'False declaration.'}</h2><p>Declared ${escape(GOODS[info.declaration]?.name || info.declaration)} · ${result.cards.length} revealed card${result.cards.length === 1 ? '' : 's'}</p><strong class="inspection-payment-headline">${headline}</strong></div><div class="inspection-revealed-grid">${result.cards.map((key, i) => `<div class="inspection-revealed-card ${info.cardMatches[i] ? 'matches' : 'mismatch'}">${evidenceCard(key, i)}<span>${info.cardMatches[i] ? '✓ Matches declaration' : '⚑ Outside declaration'}</span></div>`).join('')}</div><div class="inspection-payment-list">${payments.map(p => `<article><div><b>${escape(p.bank ? 'Bank' : inspectionPlayer(p.payer))} → ${escape(inspectionPlayer(p.payee))}</b><small>${escape(p.kind)}${p.bank && p.payer ? ` · on ${p.payer === selfId ? 'your' : `${escape(inspectionPlayer(p.payer))}’s`} behalf` : ''}</small></div><strong>€${p.amount}</strong>${p.settled !== p.amount || p.coins !== p.settled ? `<p>Settled value: €${p.settled}${p.coins !== p.settled ? `, including €${p.settled - p.coins} in goods` : ''}.${p.settled < p.amount ? ' Unpaid remainder waived.' : ''}</p>` : ''}</article>`).join('') || '<p>No fine or compensation was charged.</p>'}</div><p class="inspection-resolution-note">${escape(result.message)}</p><p class="fine-print">Payments above are already settled automatically. No extra payment is needed.</p>`;
+}
+function renderInspectionDialog() {
+  const dialog = $('#inspection-dialog'); if (!dialog) return;
+  let markup = '', mode = null;
+  if (state?.pendingInspection) {
+    const key = pendingInspectionKey();
+    if (!dismissedInspectionWindows.has(key)) { markup = piperPanel(true) + pendingInspectionMarkup(); mode = { type: 'pending', key }; }
+  } else {
+    if (!activeInspectionResult && inspectionQueue.length) activeInspectionResult = inspectionQueue.shift();
+    if (activeInspectionResult && state) { markup = piperPanel(true) + inspectionResultMarkup(activeInspectionResult); mode = { type: 'result', key: activeInspectionResult.inspection.id }; }
+  }
+  if (!mode) { if (dialog.open) dialog.close(); $('#inspection-dialog-body').innerHTML = ''; inspectionMode = null; inspectionMarkup = ''; return; }
+  if (markup !== inspectionMarkup) {
+    const same = inspectionMode?.key === mode.key, scroll = $('#inspection-dialog-body').scrollTop;
+    $('#inspection-dialog-body').innerHTML = markup; $('#inspection-dialog-body').scrollTop = same ? scroll : 0; inspectionMarkup = markup;
+  }
+  inspectionMode = mode; $('#inspection-dialog-title').textContent = mode.type === 'result' ? 'INSPECTION RESULT · CARDS & PAYMENTS' : 'INSPECTION · DECISION IN PROGRESS';
+  $('#inspection-dialog-done').textContent = mode.type === 'result' && inspectionQueue.length ? 'Next result →' : 'Back to table';
+  if (!dialog.open) dialog.showModal();
+  updateCountdowns();
+}
+function closeInspectionDialog() {
+  if (inspectionMode?.type === 'pending') dismissedInspectionWindows.add(inspectionMode.key);
+  else activeInspectionResult = null;
+  $('#inspection-dialog').close(); inspectionMode = null; inspectionMarkup = ''; render();
+}
+function reviewInspectionButton() { return state.results.some(result => result.inspection) ? '<button class="small-text-button review-inspection-button" data-action="review-inspection">Review latest inspection · Cards & payment ↗</button>' : ''; }
+
 function countdown(deadline) { return `<span class="ability-countdown" data-ability-deadline="${deadline}" role="timer">20s remaining</span>`; }
-function piperPanel() {
+function piperPanel(inDialog = false) {
+  if (!inDialog && inspectionWillShow()) return '';
   return (state.piperOffers || []).map(offer => {
     const payer = state.players.find(p => p.id === offer.from), recipient = state.players.find(p => p.id === offer.to);
     return `<section class="piper-opportunity trigger-window" data-trigger-deadline="${offer.expiresAt}"><span class="eyebrow">THIEF IN THE NIGHT · ACCEPTED BRIBE</span>${countdown(offer.expiresAt)}<p>${escape(payer.name)} paid ${escape(recipient.name)} €${offer.amount}. Piper may claim €${offer.share}; that share is held until she decides or time expires.</p>${selfId === offer.piper ? `<div class="response-actions"><button class="ability-button" data-action="piper-use" data-offer="${offer.id}">Steal €${offer.share}</button><button class="secondary-button" data-action="piper-skip" data-offer="${offer.id}">Skip · Save ability</button></div>` : '<p class="waiting-line">Waiting for Piper’s triggered choice.</p>'}</section>`;
@@ -171,19 +220,32 @@ setInterval(() => {
   updateCountdowns();
 }, 250);
 function requestBribeForm(target) {
-  const request = target.bag.deaRequest;
+  const request = target.deaRequest || target.bag?.deaRequest;
   const amount = requestDrafts.get(target.id) ?? request?.amount ?? Math.min(5, target.coins);
-  return `<form class="dea-request-form" data-bribe-request-target="${target.id}"><label for="request-${target.id}">REQUEST A BRIBE FOR SAFE PASSAGE</label><div class="join-row"><input id="request-${target.id}" data-request-for="${target.id}" type="number" min="0" step="1" value="${amount}" required inputmode="numeric"><button class="secondary-button" type="submit">${request ? 'Update request' : 'Request bribe'}</button></div><p>${request ? `Current request: €${request.amount}. ` : ''}If ${escape(target.name)} agrees, payment and passage happen automatically.</p>${request ? `<button class="quiet-button" type="button" data-action="withdraw-request" data-id="${target.id}">Withdraw request</button>` : ''}</form>`;
+  return `<form class="dea-request-form" data-bribe-request-target="${target.id}"><label for="request-${target.id}">REQUEST A BRIBE FOR SAFE PASSAGE</label><div class="join-row"><input id="request-${target.id}" data-request-for="${target.id}" type="number" min="0" step="1" value="${amount}" required inputmode="numeric"><button class="secondary-button" type="submit">${request ? 'Update request' : 'Request bribe'}</button></div><p>${request ? `Current request: €${request.amount}. ` : ''}If ${escape(target.name)} agrees, payment is immediate and their declared packet passes automatically.</p>${request ? `<button class="quiet-button" type="button" data-action="withdraw-request" data-id="${target.id}">Withdraw request</button>` : ''}</form>`;
 }
 function requestedBribe(p) {
-  const request = p.bag?.deaRequest; if (!request) return '';
+  const request = p.deaRequest || p.bag?.deaRequest; if (!request) return '';
   const waiting = state.pendingInspection && state.pendingInspection.target !== p.id;
-  return `<div class="requested-bribe"><span class="eyebrow">D.E.A. REQUESTS €${request.amount}</span><p>Accept to pay €${request.amount} and automatically pass your packet unopened.</p><div class="response-actions"><button class="primary-button" data-action="accept-request" data-request="${request.id}" ${p.coins < request.amount || waiting ? 'disabled' : ''}>Agree · Pay €${request.amount} & pass</button><button class="secondary-button" data-action="decline-request" data-request="${request.id}">Decline request</button></div>${p.coins < request.amount ? '<p>You do not have enough coins for this request.</p>' : waiting ? '<p>Waiting for the current packet’s decision before you can accept.</p>' : ''}</div>`;
+  return `<div class="requested-bribe"><span class="eyebrow">D.E.A. REQUESTS €${request.amount}</span><p>Accept to pay €${request.amount} now and guarantee passage once your packet is loaded and declared.</p><div class="response-actions"><button class="primary-button" data-action="accept-request" data-request="${request.id}" ${p.coins < request.amount || waiting ? 'disabled' : ''}>Agree · Pay €${request.amount} & pass</button><button class="secondary-button" data-action="decline-request" data-request="${request.id}">Decline request</button></div>${p.coins < request.amount ? '<p>You do not have enough coins for this request.</p>' : waiting ? '<p>Waiting for the current packet’s decision before you can accept.</p>' : ''}</div>`;
 }
 function negotiationPanel() {
   const p = me();
-  if (!['market', 'pack', 'declare', 'inspect'].includes(state.phase) || state.players[state.dea].id === p.id || p.bag?.resolved) return '';
-  return `<section class="live-negotiation">${requestedBribe(p)}<span class="eyebrow">LIVE BRIBE OFFER · €${p.bribeOffer}</span><p>Make, change, or revoke your offer while the decision is pending. The D.E.A. accepts the current offer to pass your unopened packet.</p><form id="bribe-form"><label for="new-bribe">YOUR OFFER TO THE D.E.A.</label><div class="join-row"><input id="new-bribe" type="number" min="0" max="${p.coins}" value="${p.bribeOffer}" required inputmode="numeric"><button class="secondary-button" type="submit">Publish offer</button><button class="quiet-button" data-action="revoke-bribe" type="button">Revoke</button></div></form></section>`;
+  if (!['market', 'pack', 'declare', 'inspect'].includes(state.phase)) return '';
+  if (state.players[state.dea].id === p.id) {
+    if (state.phase === 'inspect') return '';
+    return `<section class="live-negotiation"><span class="eyebrow">EARLY DEALS · D.E.A. NEGOTIATIONS</span><p>Agree on a price before packets are handed over. Accepted deals are paid now and guarantee passage after loading and declarations.</p><div class="early-deal-grid">${state.players.filter((_,i) => i !== state.dea).map(merchant => `<article class="early-deal-card"><h3>${escape(merchant.name)}</h3>${merchant.paidPassage ? `<p class="paid-passage">✓ €${merchant.paidPassage.amount} paid · Passage guaranteed</p>` : `<p>Smuggler’s current offer: €${merchant.bribeOffer}</p><button class="primary-button" data-action="accept-bribe" data-id="${merchant.id}" data-amount="${merchant.bribeOffer}" ${merchant.bribeOffer > merchant.coins ? 'disabled' : ''}>${merchant.bribeOffer ? `Accept €${merchant.bribeOffer} offer` : 'Agree to free passage'}</button>${requestBribeForm(merchant)}`}</article>`).join('')}</div></section>`;
+  }
+  if (p.bag?.resolved) return '';
+  if (p.paidPassage) return `<section class="live-negotiation paid-passage"><span class="eyebrow">PASSAGE ALREADY PAID · €${p.paidPassage.amount}</span><p>Your deal is binding. Load and declare your packet normally; it will pass automatically without a second bribe payment.</p></section>`;
+  return `<section class="live-negotiation">${requestedBribe(p)}<span class="eyebrow">LIVE BRIBE OFFER · €${p.bribeOffer}</span><p>Make, change, or revoke your offer until it is accepted. Accepted early deals are paid now and guarantee passage after loading and declarations.</p><form id="bribe-form"><label for="new-bribe">YOUR OFFER TO THE D.E.A.</label><div class="join-row"><input id="new-bribe" type="number" min="0" max="${p.coins}" value="${p.bribeOffer}" required inputmode="numeric"><button class="secondary-button" type="submit">Publish offer</button><button class="quiet-button" data-action="revoke-bribe" type="button">Revoke</button></div></form></section>`;
+}
+function publicLogPanel() {
+  const all = state.publicActions || [];
+  const rounds = [...new Set(all.map(entry => entry.round))].sort((a,b) => a-b);
+  const matches = all.filter(entry => (publicLogRound === '' || entry.round === Number(publicLogRound)) && entry.text.toLowerCase().includes(publicLogSearch.toLowerCase()));
+  const shown = (publicLogExpanded ? matches : matches.slice(-20)).slice().reverse();
+  return `<section class="ledger public-action-log"><div class="section-heading"><h2>Public action log</h2><span class="eyebrow">${all.length} PUBLIC EVENTS</span></div><p class="public-log-note">Discards are public. Private draws, hands, unshared samples, and unopened packet contents stay hidden.</p><div class="public-log-filters"><label for="public-log-round">ROUND<select id="public-log-round"><option value="">All rounds</option>${rounds.map(round => `<option value="${round}" ${String(round) === publicLogRound ? 'selected' : ''}>${round ? `Round ${round}` : 'Setup'}</option>`).join('')}</select></label><label for="public-log-search">SEARCH<input type="search" id="public-log-search" placeholder="Player, action, or card…" value="${escape(publicLogSearch)}"></label></div><div class="public-log-entries">${shown.map(entry => `<article><span class="public-log-meta">${entry.round ? `R${entry.round}` : 'SETUP'} · ${escape(new Date(entry.at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}))}</span><p>${escape(entry.text)}</p></article>`).join('') || '<p>No matching public actions.</p>'}</div>${matches.length > 20 ? `<button class="small-text-button" data-action="toggle-public-log">${publicLogExpanded ? 'Show latest 20' : `Show all ${matches.length} matching actions`}</button>` : ''}</section>`;
 }
 function inspectorResponses(target) {
   const p = me(); if (state.players[state.dea].id !== selfId || target.bag.abilityClaim) return '';
@@ -204,6 +266,13 @@ function pendingInterventions() {
 function pendingInspectionPanel() {
   const pending = state.pendingInspection, target = state.players.find(p => p.id === pending.target), inspector = state.players.find(p => p.id === pending.inspector);
   const ownInspector = selfId === inspector.id, ownTarget = selfId === target.id;
+  if (['andrew-before', 'andrew-after'].includes(pending.stage)) {
+    const before = pending.stage === 'andrew-before';
+    if (!ownTarget) return '<div class="inspection-response"><span class="eyebrow">A MYSTERY</span><h2>A mysterious interruption.</h2><p class="waiting-line">Waiting for Andrew. The packet’s contents remain private.</p></div>';
+    const cards = before ? target.bag.cards : pending.returnCards;
+    const draft = andrewDrafts.get(pendingInspectionKey()) || cards;
+    return `<div class="inspection-response"><span class="eyebrow">PRIVATE · GOD ANDREW</span><h2>${before ? 'Inspection committed.' : 'Your cards are returning.'}</h2><p>${before ? 'Choose the cards the inspector will find. These cards determine fines and stolen goods.' : 'Choose what your returned cards become in your stash. The inspection payment is already determined.'} Keep ${cards.length} cards. The deck is unchanged.</p><form id="andrew-change-form"><div class="response-actions"><button class="ability-button" type="button" data-action="andrew-all-burners">All burners</button><button class="secondary-button" type="button" data-action="andrew-all-legal">All legal</button></div><div class="andrew-picker">${cards.map((key, i) => `<label for="andrew-card-${i}">Card ${i + 1}<select id="andrew-card-${i}" data-andrew-index="${i}">${Object.entries(GOODS).map(([value, good]) => `<option value="${value}" ${draft[i] === value ? 'selected' : ''}>${good.name}</option>`).join('')}</select></label>`).join('')}</div><div class="response-actions"><button class="ability-button" type="submit">Apply cards</button><button class="secondary-button" type="button" data-action="andrew-skip">Keep current cards</button></div></form></div>`;
+  }
   if (pending.stage === 'dahlia-response') {
     const cards = ownTarget ? target.bag.cards.map((key, i) => evidenceCard(key, i, 'dahlia-card', dahliaSelected.has(i))).join('') : '<p>The packet remains sealed. Only Dahlia can see its cards.</p>';
     const extra = me().character === 'fring' && !me().abilityUsed && !ownInspector && !ownTarget ? `<button class="ability-button" data-action="fring" data-id="${target.id}">The Boss Man · Activate first</button>` : '';
@@ -266,7 +335,7 @@ function chatPanel() {
 function game() {
   const steps = ['market', 'pack', 'declare', 'inspect', 'results'], index = steps.indexOf(state.phase);
   const dea = state.players[state.dea];
-  return `${header()}<main class="table-main">${status === 'disconnected' || status === 'error' ? `<div class="disconnect-banner" role="alert">Connection lost. Keep this tab open and rejoin to recover your seat. <button class="secondary-button" data-action="rejoin">Rejoin table</button></div>` : status && status !== 'connected' ? `<div class="notice">${escape(status)}</div>` : ''}${state.phase === 'lobby' ? lobby() : state.phase === 'finished' ? finishedPanel() : `<div class="game-topline"><div><span class="eyebrow">${demo ? 'PRACTICE TABLE' : `ROOM ${escape(currentCode())}`}</span><h1>Let the games begin.</h1></div><div class="round-counter"><span>ROUND</span><strong>${state.round}<small> / ${state.totalRounds}</small></strong></div></div><div class="players-row">${state.players.map(playerTile).join('')}</div><div class="table-columns"><div class="play-column"><div class="phase-bar">${steps.map((s, i) => `<span class="${index === i ? 'active' : index > i ? 'complete' : ''}"><b>${index > i ? '✓' : `0${i + 1}`}</b> ${phaseNames[s]}</span>`).join('')}</div>${abilityPanel()}${contestSummary()}${piperPanel()}${negotiationPanel()}<section class="action-panel">${state.phase === 'market' ? marketPanel() : state.phase === 'pack' ? packPanel() : state.phase === 'declare' ? declarationPanel() : state.phase === 'inspect' ? inspectionPanel() : resultsPanel()}</section>${handPanel()}<section class="ledger"><div class="section-heading"><h2>The case notes</h2><span class="eyebrow">D.E.A.: ${escape(dea.name)}</span></div>${state.log.slice(-5).reverse().map(line => `<p>↳ ${escape(line)}</p>`).join('')}</section></div>${chatPanel()}</div>`}</main><footer class="table-footer"><span>BETTER SMUG DRUG · THE ONLINE TABLE</span><button data-action="rules">Need a little guidance? ↗</button><span>${demo ? 'PRACTICE MODE' : 'HOST KEEPS THE TABLE OPEN'}</span></footer>`;
+  return `${header()}<main class="table-main">${status === 'disconnected' || status === 'error' ? `<div class="disconnect-banner" role="alert">Connection lost. Keep this tab open and rejoin to recover your seat. <button class="secondary-button" data-action="rejoin">Rejoin table</button></div>` : status && status !== 'connected' ? `<div class="notice">${escape(status)}</div>` : ''}${state.phase === 'lobby' ? lobby() : state.phase === 'finished' ? finishedPanel() + publicLogPanel() : `<div class="game-topline"><div><span class="eyebrow">${demo ? 'PRACTICE TABLE' : `ROOM ${escape(currentCode())}`}</span><h1>Let the games begin.</h1></div><div class="round-counter"><span>ROUND</span><strong>${state.round}<small> / ${state.totalRounds}</small></strong></div></div><div class="players-row">${state.players.map(playerTile).join('')}</div><div class="table-columns"><div class="play-column"><div class="phase-bar">${steps.map((s, i) => `<span class="${index === i ? 'active' : index > i ? 'complete' : ''}"><b>${index > i ? '✓' : `0${i + 1}`}</b> ${phaseNames[s]}</span>`).join('')}</div>${abilityPanel()}${contestSummary()}${piperPanel()}${negotiationPanel()}<section class="action-panel">${state.phase === 'market' ? marketPanel() : state.phase === 'pack' ? packPanel() : state.phase === 'declare' ? declarationPanel() : state.phase === 'inspect' ? inspectionPanel() : resultsPanel()}</section>${reviewInspectionButton()}${handPanel()}${publicLogPanel()}</div>${chatPanel()}</div>`}</main><footer class="table-footer"><span>BETTER SMUG DRUG · THE ONLINE TABLE</span><button data-action="rules">Need a little guidance? ↗</button><span>${demo ? 'PRACTICE MODE' : 'HOST KEEPS THE TABLE OPEN'}</span></footer>`;
 }
 function render() {
   const active = document.activeElement, focusId = active?.id;
@@ -276,6 +345,7 @@ function render() {
   const chatBox = $('#chat-messages'), atBottom = !chatBox || chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < 45;
   const scroll = chatBox?.scrollTop || 0;
   $('#app').innerHTML = screen === 'home' ? home() : game();
+  renderInspectionDialog();
   if (focusId) {
     const next = document.getElementById(focusId);
     if (next) { if (offerDraft !== null) next.value = offerDraft; next.focus({ preventScroll: true }); if (start != null && ['text', 'search'].includes(next.type)) next.setSelectionRange(start, end); }
@@ -285,6 +355,10 @@ function render() {
 }
 function currentCode() { return demo ? 'PRACTICE' : network?.code || code; }
 function receive(next) {
+  for (const result of next.results) {
+    const id = result.inspection?.id; if (!id || !Array.isArray(result.cards) || seenInspectionResults.has(id)) continue;
+    seenInspectionResults.add(id); if (state) inspectionQueue.push(result);
+  }
   if (state?.round !== next.round) requestDrafts.clear();
   const enteringDeclaration = next.phase === 'declare' && (state?.phase !== 'declare' || state.round !== next.round);
   const nextPendingKey = `${next.round}:${next.pendingInspection?.stage}:${next.pendingInspection?.target}`;
@@ -320,7 +394,7 @@ function scheduleBots() {
     }
   }, 1100 + Math.random() * 600);
 }
-function destroySession() { clearTimeout(botTimer); network?.destroy(); network = null; demo = null; }
+function destroySession() { andrewDrafts.clear(); cheatKeys.clear(); inspectionQueue = []; activeInspectionResult = null; seenInspectionResults.clear(); dismissedInspectionWindows.clear(); inspectionMode = null; inspectionMarkup = ''; $('#inspection-dialog')?.close(); clearTimeout(botTimer); network?.destroy(); network = null; demo = null; }
 function startConnection(mode, smugglerName, room) {
   destroySession(); busy = true; status = ''; lastError = ''; render();
   network = new TableNetwork({ token: guestSecret, analyticsId: localAnalyticsId, onHostState: archiveIfFinished, onState: receive, onStatus: next => { status = next; if (next === 'error') busy = false; render(); }, onError: message => { lastError = message; busy = false; toast(message); render(); } });
@@ -335,6 +409,17 @@ function leave() {
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-action]'); if (!button || button.disabled) return;
   const action = button.dataset.action;
+  if (action === 'andrew-all-burners' || action === 'andrew-all-legal') {
+    const pending = state?.pendingInspection, owner = me();
+    if (!pending || pending.target !== selfId || !['andrew-before', 'andrew-after'].includes(pending.stage)) return;
+    const cards = pending.stage === 'andrew-before' ? owner.bag.cards : pending.returnCards;
+    const good = action === 'andrew-all-burners' ? 'burnerPhone' : owner.bag.declaration;
+    return send({ type: 'andrew-change', cards: cards.map(() => good) });
+  }
+  if (action === 'andrew-skip') return send({ type: action });
+  if (action === 'close-inspection') return closeInspectionDialog();
+  if (action === 'open-inspection') { dismissedInspectionWindows.delete(pendingInspectionKey()); render(); return; }
+  if (action === 'review-inspection') { const result = [...state.results].reverse().find(r => r.inspection); if (result) { activeInspectionResult = result; render(); } return; }
   if (action === 'home') { event.preventDefault(); if (state) leave(); return; }
   if (action === 'characters') { $('#characters').showModal(); return; }
   if (action === 'close-characters') { $('#characters').close(); return; }
@@ -366,6 +451,7 @@ document.addEventListener('click', async event => {
     } catch (error) { toast(error.message); } return;
   }
   if (action === 'piper-use' || action === 'piper-skip') return send({ type: action, offer: button.dataset.offer });
+  if (action === 'toggle-public-log') { publicLogExpanded = !publicLogExpanded; render(); return; }
   if (action === 'withdraw-request') return send({ type: 'request-bribe', target: button.dataset.id, amount: null });
   if (action === 'accept-request' || action === 'decline-request') return send({ type: action, request: button.dataset.request });
   if (action === 'revoke-bribe') { if ($('#new-bribe')) $('#new-bribe').value = 0; return send({ type: 'bribe', amount: 0 }); }
@@ -400,11 +486,13 @@ document.addEventListener('click', async event => {
   if (action === 'pass' || action === 'inspect') return send({ type: action, target: button.dataset.id });
 });
 document.addEventListener('change', event => {
+  if (event.target.id === 'public-log-round') { publicLogRound = event.target.value; render(); return; }
   if (event.target.id === 'pete-packet') petePacket = Number(event.target.value);
   if (event.target.id === 'pete-hand') peteHand = Number(event.target.value);
   if (event.target.dataset.characterPlayer) send({ type: 'choose-character', target: event.target.dataset.characterPlayer, character: event.target.value || null });
 });
 document.addEventListener('input', event => {
+  if (event.target.id === 'public-log-search') { publicLogSearch = event.target.value; render(); return; }
   if (event.target.dataset.requestFor) requestDrafts.set(event.target.dataset.requestFor, event.target.value);
   if (event.target.dataset.guessFor) guessDrafts.set(event.target.dataset.guessFor, event.target.value);
   if (event.target.id === 'discard-crowbars') discardCrowbarsDraft = Number(event.target.value);
@@ -415,6 +503,7 @@ document.addEventListener('input', event => {
   if (event.target.id === 'room-code') { event.target.value = event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ''); code = event.target.value; }
 });
 document.addEventListener('submit', event => {
+  if (event.target.id === 'andrew-change-form') { event.preventDefault(); return send({ type: 'andrew-change', cards: [...event.target.querySelectorAll('[data-andrew-index]')].map(select => select.value) }); }
   if (event.target.dataset.bribeRequestTarget) { event.preventDefault(); return send({ type: 'request-bribe', target: event.target.dataset.bribeRequestTarget, amount: Number(event.target.querySelector('input').value) }); }
   if (event.target.dataset.guessTarget) { event.preventDefault(); return send({ type: 'l-guess', target: event.target.dataset.guessTarget, good: event.target.querySelector('select').value }); }
   if (!['room-form', 'chat-form', 'bribe-form'].includes(event.target.id)) return;
@@ -445,3 +534,21 @@ addEventListener('beforeunload', event => { if (state && !demo && state.phase !=
 render();
 
 addEventListener('keydown', event => { if (event.altKey && event.shiftKey && event.code === 'KeyA') { event.preventDefault(); window.open(new URL('./analytics.html', location.href), '_blank', 'noopener'); } });
+
+$('#inspection-dialog').addEventListener('cancel', event => { event.preventDefault(); closeInspectionDialog(); });
+$('#inspection-dialog').addEventListener('click', event => { if (event.target !== event.currentTarget) return; const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeInspectionDialog(); });
+
+// The chord is deliberately absent from the character guide.
+const andrewDrafts = new Map(), cheatKeys = new Set();
+addEventListener('change', event => {
+  if (event.target.matches('[data-andrew-index]')) andrewDrafts.set(pendingInspectionKey(), [...document.querySelectorAll('[data-andrew-index]')].map(select => select.value));
+});
+addEventListener('keydown', event => {
+  if (!['KeyC', 'KeyH', 'KeyE', 'KeyA', 'KeyT'].includes(event.code) || event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  cheatKeys.add(event.code);
+  if (cheatKeys.size === 5 && state && !['lobby', 'finished'].includes(state.phase) && me()?.character === 'andrew' && !me().godAndrew) {
+    event.preventDefault(); cheatKeys.clear(); send({ type: 'andrew-awaken' });
+  }
+});
+addEventListener('keyup', event => cheatKeys.delete(event.code));
+addEventListener('blur', () => cheatKeys.clear());

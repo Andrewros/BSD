@@ -58,7 +58,7 @@ The card data is transcribed from your reference photographs, with mixed-card be
 | Blue Sky | 3 | €10 | €6 | — |
 | Burner Phone | 3 | €10 | €6 | — |
 
-**Only ordinary Bread, Fish, Meat, and Wine are legal.** Every mixed card is illegal during inspection, including when declared as its matching food/drink. If delivered, it counts as **two** of that legal good for Kingpin/Queenpin scoring. Its printed value is added only once. Blue Sky and Burner Phone are ordinary illegal goods with no special effects. All twenty-nine character boards below are implemented.
+**Only ordinary Bread, Fish, Meat, and Wine are legal.** Every mixed card is illegal during inspection, including when declared as its matching food/drink. If delivered, it counts as **two** of that legal good for Kingpin/Queenpin scoring. Its printed value is added only once. Blue Sky and Burner Phone are ordinary illegal goods with no special effects. All thirty character boards below are implemented.
 
 | Category | Kingpin | Queenpin |
 | --- | ---: | ---: |
@@ -75,7 +75,7 @@ When euros cannot cover a penalty, stash goods transfer at face value in the ord
 
 ## Characters and abilities
 
-The twenty-nine supplied character photographs are included in `assets/characters/` and framed with CSS for the portraits. Every seat has one unique character. Character choices lock at game start. Human active abilities are triggered through visible buttons, with used/ready status on the player cards; no automatic active-ability activations or browser alerts are used. Inspection responses are inline panels, and reconnecting preserves the pending decision.
+The supplied character photographs are included in `assets/characters/` and framed with CSS for the portraits. Every seat has one unique character. Character choices lock at game start. Human active abilities are triggered through visible buttons, with used/ready status on the player cards; no automatic active-ability activations or browser alerts are used. Inspection responses are inline panels, and reconnecting preserves the pending decision.
 
 | Character | Ability |
 | --- | --- |
@@ -107,6 +107,7 @@ The twenty-nine supplied character photographs are included in `assets/character
 | Chili Powder Pinkman | Starts with five ordinary cards and one Chili Powder. Passing Chili Powder unopened awards €10 and returns it to his hand; being caught removes it permanently. Chili Powder is illegal but has €0 fine and no stash value. Other actual illegal cards have their fines reduced by €1, to a minimum of zero. |
 | Needlestick Nile | Starts with six ordinary cards plus two Used Needles. Pack at most one needle, counting toward the five-card limit; it may be alone. It matches any legal declaration and has no ordinary penalty. Inspection pays Nile €8 in addition to ordinary compensation/fines; passing costs Nile €4 separately from any bribe. The used needle always leaves the game. |
 | Temperamental Tuco | Score illegal stash cards at 1.5× their combined printed value, rounding up once. Caught illegal-card fines are 1.5× the combined normal red penalties, rounding down once; mismatching legal-card fines are added separately. |
+| Awesome Andrew | His abilities are a mystery. |
 | Pickpocket Piper | Starts with €10 extra. Twice per game, a positive paid bribe between two other players opens a 20-second choice to take half, rounded up. The recipient receives the remainder. Skipping or expiration saves the use. |
 
 ### Timing and interactions
@@ -154,7 +155,7 @@ The normal deck still contains 222 cards. Pinkman adds one exclusive Chili Powde
 
 ### D.E.A. bribe requests
 
-During inspection, the D.E.A. can request a separate amount for each unresolved packet, update it, or withdraw it. The owner may accept or decline. Acceptance atomically pays the requested amount and passes the packet unopened, including ordinary special-card and paid-bribe effects; it needs no second D.E.A. confirmation. Requests are ordinary negotiation controls, so they have no ability countdown. They persist across reconnects. Each update has a new request identity, making old acceptances invalid even when the amount happens to match again. Requests cannot override an opened packet or a conflicting activated ability. They may be accepted during L’s review or Dahlia’s continue/cancel choice, and are cleared when inspection actually opens the packet. Insufficient funds leave the request pending without taking any coins.
+From market through inspection, the D.E.A. can request a separate amount from each smuggler, update it, or withdraw it, even before a packet exists. The owner may accept or decline. Acceptance during inspection atomically pays and passes the packet. Acceptance during market/loading/declaration pays immediately and binds passage: the packet automatically passes after all loading and declarations finish, with no second bribe charge or D.E.A. confirmation. Either side can accept: the D.E.A. accepts a smuggler’s offer, or the smuggler accepts the D.E.A.’s request. Accepted deals cannot be revoked; offers and requests remain changeable before agreement. Special-card and paid-bribe effects still apply. Early deals still require the normal market/loading/declaration steps. An agreed price can exceed the smuggler’s remaining purse during declaration because it was already paid. Requests are ordinary negotiation controls, so they have no ability countdown. They persist across reconnects. Each update has a new request identity, making old acceptances invalid even when the amount happens to match again. Requests cannot override an opened packet or a conflicting activated ability. They may be accepted during L’s review or Dahlia’s continue/cancel choice, and are cleared when inspection actually opens the packet. Insufficient funds leave the request pending without taking any coins.
 
 ## Private local analytics casebook
 
@@ -169,3 +170,15 @@ The dashboard shows player and character win rates, bluff frequency, inspection 
 The leading-card panel ranks cards with at least 10 final-stash holder outcomes by their 95% Wilson lower confidence bound. This is an observed association, not a causal strength estimate: player skill, characters, table size, and majority scoring can affect it. Sample sizes remain visible.
 
 **Export all data** downloads the versioned JSON archive, including actions and cards. **Packet CSV** exports one row per packet for spreadsheet analysis. **Import games** validates a whole file before writing, removes unrecognized fields, and updates matching game IDs instead of double-counting them. Export files before clearing browser data or moving devices. The delete button asks for confirmation and removes only saved game records; current games are unaffected. GitHub Pages deployment includes all analytics files; no database service, API key, or server is needed.
+
+## Public action log
+
+The table’s Public action log shows important public actions throughout the game and remains available after final scoring. It includes exact market discard counts and card types, replacement draw counts, sealed packet counts, declarations, offers and revocations, requested prices and accepted deals, inspection decisions and reveals, paid passage, and ability outcomes. The log shows the latest 20 matches initially, can expand to the retained history (up to 2,000 events), and supports round/search filters. Each entry has a timestamp and round.
+
+Private deck draws and hands are never logged. Rick’s three discarded hand cards are public, while his three secret discard-pile picks stay hidden. L’s samples remain private until shared; Dahlia’s removals appear only after the agent decides. Passed packet contents remain hidden. The host-only analytics audit is separate from this public log.
+
+## Inspection result popups
+
+A full inspection automatically opens a centered popup with the revealed cards, matching/nonmatching labels, an honest/false declaration verdict, and structured payment receipts. It states whether the current viewer pays or receives money and identifies each payer/recipient. Amounts are already settled by the game; bank-funded payments, shared fines, extra Needle/Hector charges, bank rewards, and insufficient-funds payments are shown separately. Goods surrendered for debt appear as settled value without revealing unrelated card identities.
+
+Pending inspection/ability decisions open in the same window with their existing controls and 20-second triggered deadlines. Sealed cards and unshared L samples retain their normal privacy. Piper’s active bribe opportunities remain accessible inside the popup. Result popups stay until dismissed and have no artificial countdown. Consecutive results queue, and **Review latest inspection** reopens a dismissed result. Chat updates do not reopen acknowledged results. Unopened passes never generate a revealed-card popup.

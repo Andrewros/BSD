@@ -9,7 +9,7 @@ class FakePeer extends EventEmitter {
   reconnect() {}
 }
 class Connection extends EventEmitter {
-  constructor(id, token, name = 'Guest') { super(); this.metadata = { id, token, name, version: 11 }; this.messages = []; this.open = false; }
+  constructor(id, token, name = 'Guest') { super(); this.metadata = { id, token, name, version: 14 }; this.messages = []; this.open = false; }
   send(message) { this.messages.push(structuredClone(message)); }
   close() { this.open = false; this.emit('close'); }
   connect() { this.open = true; this.emit('open'); }

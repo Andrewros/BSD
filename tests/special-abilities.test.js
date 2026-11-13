@@ -7,8 +7,8 @@ function table(roles = ['hank', 'pinkman', 'nile', 'tuco', 'piper']) {
 const bag = (cards, declaration = 'bread', bribe = 0) => ({ cards, count: cards.length, declaration, bribe, resolved: false });
 function inspect(roles) { const g = table(roles); g.phase = 'inspect'; g.players.forEach((p, i) => { p.coins = 50; if (i) p.bag = bag(['bread']); }); return g; }
 
-test('29 characters: Pinkman replaces sixth card, Nile gets two extras, Piper starts with ten extra', () => {
- const g = table(); assert.equal(Object.keys(CHARACTERS).length, 29); assert.equal(g.players[1].hand.length, 6); assert.equal(g.players[1].hand.filter(c => c === 'chiliPowder').length, 1);
+test('30 characters: Pinkman replaces sixth card, Nile gets two extras, Piper starts with ten extra', () => {
+ const g = table(); assert.equal(Object.keys(CHARACTERS).length, 30); assert.equal(g.players[1].hand.length, 6); assert.equal(g.players[1].hand.filter(c => c === 'chiliPowder').length, 1);
  assert.equal(g.players[2].hand.length, 8); assert.equal(g.players[2].hand.filter(c => c === 'usedNeedle').length, 2); assert.equal(g.players[4].coins, 60); assert.equal(g.cardTotal, CATALOG_SIZE + 3);
  assert.ok(!g.deck.some(c => c === 'chiliPowder' || c === 'usedNeedle')); assert.equal(viewFor(g, 'p0').players[2].hand, null);
 });
