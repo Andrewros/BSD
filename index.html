@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12271f">
+  <meta name="description" content="Better Smug Drug online: load your envelope, bluff the D.E.A., and build your fortune. A handmade game of legal goods, illegal goods, and very questionable alibis.">
+  <title>Better Smug Drug · The Online Table</title>
+  <link rel="icon" href="./assets/crest.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./vendor/peerjs.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="rules">
+    <div class="dialog-head"><span class="eyebrow">BETTER SMUG DRUG · THE RULES</span><button class="icon-button" data-action="close-rules" aria-label="Close rules">✕</button></div>
+    <h2>A little honesty.<br>A little bribery.</h2>
+    <p>Get valuable goods past the D.E.A. and into your stash. The richest smuggler after everyone has been the agent three times in a 3-player game, or twice in a 4–5-player game, wins. Play with 3–5 people, or fill empty seats with practice bots.</p>
+    <ol class="rule-list">
+      <li><b>Market.</b> Start with €50 and six cards. Smugglers may exchange up to five cards with the deck once per round. The D.E.A. sits out.</li>
+      <li><b>Load envelope.</b> Secretly select 1–5 cards and seal them. Everyone finishes loading before declarations begin.</li>
+      <li><b>Declaration.</b> Declare a single legal good: bread, fish, meat, or wine. The number of cards is always truthful. Offer euros for safe passage.</li>
+      <li><b>Inspection.</b> Bargain in table chat and revise your offer. The D.E.A. opens envelopes or lets them pass in any order. Bribes are paid only for unopened envelopes. An entirely honest envelope earns compensation from the agent. Otherwise, everything that differs from the declaration is confiscated and its printed penalty is owed. Mixed cards are always illegal.</li>
+      <li><b>End of round.</b> Review the results, refill hands, and pass the D.E.A. badge. After the final round, score euros + printed goods values + Kingpin/Queenpin bonuses. Each delivered mixed card counts as <b>two</b> of its matching legal good for these bonuses, while retaining its own printed value. Blue Sky and Burner Phone have no special effects.</li>
+    </ol>
+    <p class="fine-print">Choose a character in the lobby, or receive a random remaining character at the start. Active abilities use the buttons at the table; Katagiri’s start/end payments and passive fine modifier apply automatically.</p>
+    <button class="ability-button" data-action="characters">Characters & ability interactions ↗</button>
+    <p class="fine-print">Benny’s crowbars become legal for him after collecting three in his stash, and their penalty becomes €2. This does not change their legality for other characters.</p>
+    <div class="goods-guide" id="goods-guide"></div>
+    <p class="fine-print">Tied Kingpins split Kingpin + Queenpin bonuses, rounded down; tied Queenpins split the Queenpin bonus. Zero goods earn no majority bonus. Equal final scores share the win. If a fine exceeds your euros, stash goods are surrendered at face value without change; any unpaid remainder is waived. Exchanges draw only from the deck. Use chat or your own voice call to negotiate.</p>
+    <p class="fine-print">Online tables use PeerJS signaling and direct WebRTC connections. Keep the host’s tab open. A guest can rejoin with the same browser tab; the host cannot recover a closed or refreshed game. Some restricted networks may prevent connections.</p>
+  </dialog>
+  <dialog id="cards" aria-labelledby="cards-title">
+    <div class="dialog-head"><span class="eyebrow" id="catalog-count">222 CARDS · 17 TYPES</span><button class="icon-button" data-action="close-cards" aria-label="Close card guide">✕</button></div>
+    <h2 id="cards-title">Know your cargo.</h2>
+    <p>The symbols, values, penalties, and quantities from your handmade deck. Blue boxes show value; red boxes show inspection penalties.</p>
+    <div id="card-catalog"></div>
+  </dialog>
+  <dialog id="characters" aria-labelledby="characters-title">
+    <div class="dialog-head"><span class="eyebrow">TWENTY-NINE CHARACTER BOARDS · CHOOSE YOUR ADVANTAGE</span><button class="icon-button" data-action="close-characters" aria-label="Close character guide">✕</button></div>
+    <h2 id="characters-title">A familiar face.<br>A dangerous advantage.</h2>
+    <p>Choose a character in the lobby on a first-come, first-served basis. Your selection reserves it immediately; you can switch or release it until the game starts. Any unclaimed choices are assigned randomly when the game starts. Abilities use the buttons at the table; no pop-up alerts or automatic activations for human players.</p>
+    <div id="character-guide"></div>
+    <h3>When abilities meet</h3>
+    <p class="fine-print">Zach and Junior activate as D.E.A. after declarations and before opening. They check legality for the owner, including Benny’s unlocked crowbars, rather than declaration truthfulness. Both replace normal fines and bribes. Zach steals every card from an all-legal envelope; otherwise the owner keeps everything. Junior leaves every envelope with its owner and earns €8 only for an all-legal envelope.</p>
+    <p class="fine-print">Heisenberg gets a response after an ordinary inspection is chosen but before cards are revealed. Declining saves his use. Activating makes the inspector choose: proceed with double fines/compensation, or back down, pass the unopened envelope, and give Heisenberg a €5 bank reward without paying the earlier bribe. A prior conflicting inspection ability takes priority; Fring or a Zach/Junior inspector may also activate first while Heisenberg has not yet used his challenge.</p>
+    <p class="fine-print">Heisenberg’s Meth scores €10 and Blue Sky €13 while in his stash. Mixed cards have no bonus. Printed values remain the basis for contests, Dana’s card comparison, and settling debts with goods.</p>
+    <p class="fine-print">Selena chooses a payment source only after an inspection fine is known. Vault Venture pays the full fine from the bank without using her coins or stash; normal payment saves the use. It also covers compensation Selena owes as D.E.A., including doubled Heisenberg compensation or refusing a Jimmy/Kim offer. It does not fund bribes or Katagiri’s payments. Her €1 passive applies once to a positive bribe actually paid between two other players, not offers, fines, zero bribes, or her own transactions.</p>
+    <p class="fine-print">Wendy’s own delivered Meth cards each add one deck card directly to her stash; Blue Sky adds two. Bonus cards do not trigger further draws and are private to Wendy when illegal. Fewer cards are drawn if both piles empty. Only ordinary Meth has a zero fine; it stays illegal and is confiscated when caught. Blue Sky and mixed cards retain normal fines. Bonus cards do not count toward her envelope’s value in Shinomiya’s contest.</p>
+    <p class="fine-print">Conflicting inspection abilities use first activation. L’s sample reserves the inspection decision for L; Kim or Jimmy cannot intervene afterward. A prior Kira, Fring, or L sampling ability takes priority over Dana’s Split Decision. Passive information and Shinomiya’s end-of-round contest continue when their effects are compatible.</p>
+    <p class="fine-print">Benny needs three crowbars together in his stash to unlock legal crowbars permanently. His €2 crowbar penalty applies to honest compensation and mismatched declarations. His market discard draws replace selected exchange draws, never add extra cards; discard crowbars are drawn first.</p>
+    <p class="fine-print">Dana clicks after an ordinary inspection reveals at least two illegal cards. She selects exactly two, and the inspector chooses one to keep. Other mismatches are confiscated and fined normally. Only the selected pair is exempt. The higher-value choice pays Dana €4 from the bank; a tie pays nothing. Declining the ability saves its use.</p>
+    <p class="fine-print">Hank activates or skips surveillance during each of his D.E.A. market phases. Only Hank sees the first two replacement draws per smuggler, including any already drawn that phase. The market waits for his choice. The initial deal and round refills are excluded, and the intel clears next round.</p>
+    <p class="fine-print">L samples a random card privately and returns it unchanged. L may reveal just that sample to everyone, then inspect or pass. Nobody else may force that envelope open while L decides. L has three sample uses, plus one illegal-type guess per envelope that does not spend a sample use. A guess may be made before the full opening, including while reviewing a sample. Opening pays €1 per matching illegal card; passing pays nothing and does not reveal the result.</p>
+    <p class="fine-print">Kim clicks after declarations and before inspection is chosen, with at least one illegal card and €15 available. If the D.E.A. accepts, Kim pays €15 and all goods pass unopened. If refused, legal goods are delivered and paid at €4 each, illegal cards are confiscated, and normal fines do not apply.</p>
+    <p class="fine-print">Shinomiya gets a decision before declarations: challenge or save the ability for a later round. Only goods delivered from the two competing envelopes count; Fring’s stolen goods and confiscated cards do not. A tie leaves both deliveries alone. Goods already surrendered to pay debts are not transferred twice.</p>
+    <p class="fine-print">Jimmy and Fring cannot both use their abilities on the same envelope. The host accepts the first valid ability action received. Jimmy must click Better Call Saul before the D.E.A. chooses to inspect. Once inspection is chosen, it resolves immediately; Jimmy cannot respond or use his ability afterward. Once Jimmy activates, the inspector must settle his offer before any other envelope is resolved.</p>
+    <p class="fine-print">Jimmy’s offer replaces the ordinary bribe and fines. Opening his envelope delivers every ordinary legal card, even if it differs from his declaration; all illegal cards are confiscated. Jimmy needs enough euros to cover the offer. Fring’s takeover delivers all ordinary legal cards and steals all illegal cards, with no normal fines; if everything is legal, Fring pays a flat €3.</p>
+    <p class="fine-print">Katagiri’s set is ordinary Bread + Fish + Meat + Wine + any illegal card. Mixed cards satisfy the illegal category, not an ordinary legal category. Completing the set permanently ends doubled illegal-card fines and unlocks the end-game payment, even if goods are later lost. Legal cards that mismatch a declaration still have ordinary fines.</p>
+    <p class="fine-print">Kira blocks inspection only during the target’s next D.E.A. turn. That agent must pass Light’s envelope; any voluntary bribe still applies. If the target has no D.E.A. turn left, a successful judgement awards €20 from the bank instead. Jimmy cannot respond after Kira’s inspection is chosen. If Jimmy activates first, his offer must be settled instead; Kira cannot be added to that pending offer.</p>
+  </dialog>
+  <noscript>This game needs JavaScript enabled. No installation or account is required.</noscript>
+</body>
+</html>
