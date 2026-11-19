@@ -2,6 +2,7 @@ import { createGame, addPlayer, act, viewFor } from './engine.js';
 
 const PREFIX = 'better-smug-drug-v15-';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const JOIN_CONNECTION_ERROR = 'Could not establish a WebRTC connection to the host. Keep the host’s table open and try joining from another network, such as a phone hotspot.';
 export function roomCode() {
   return Array.from(crypto.getRandomValues(new Uint8Array(6)), n => ALPHABET[n % ALPHABET.length]).join('');
 }
@@ -72,19 +73,26 @@ export class TableNetwork {
   join(code, name, id) {
     this.requirePeer(); this.code = code; this.selfId = id;
     const peer = new this.PeerClass({ debug: 0 }); this.setup(peer);
-    this.timeout = setTimeout(() => this.fail('Connection timed out. Ask the host to keep their table open, or try another network.'), 20000);
+    this.timeout = setTimeout(() => this.fail(this.conn ? JOIN_CONNECTION_ERROR : 'The room service did not respond. Please try again.'), 20000);
     peer.on('open', () => {
       if (this.closed || this.conn?.open) return;
       const conn = peer.connect(PREFIX + code, { reliable: true, metadata: { name, id, token: this.token, analyticsId: this.analyticsId, version: 15 } });
       this.conn = conn;
+      let joined = false, rejected = false;
       conn.on('data', message => {
-        if (this.closed) return;
-        if (message?.type === 'state') { clearTimeout(this.timeout); this.onStatus('connected'); this.onState(message.state); }
-        else if (message?.type === 'rejected') this.fail(message.message);
+        if (this.closed || this.conn !== conn) return;
+        if (message?.type === 'state') { joined = true; clearTimeout(this.timeout); this.onStatus('connected'); this.onState(message.state); }
+        else if (message?.type === 'rejected') { rejected = true; this.fail(message.message); }
         else if (message?.type === 'error') this.onError(message.message);
       });
-      conn.on('close', () => { if (!this.closed) { clearTimeout(this.timeout); this.onStatus('disconnected'); } });
-      conn.on('error', () => { if (!this.closed) this.fail('The connection to the host was interrupted. Rejoin with the same room code.'); });
+      conn.on('close', () => {
+        if (this.closed || this.conn !== conn || rejected) return;
+        if (!joined) { this.fail(JOIN_CONNECTION_ERROR); return; }
+        clearTimeout(this.timeout); this.onStatus('disconnected');
+      });
+      conn.on('error', () => {
+        if (!this.closed && this.conn === conn && !rejected) this.fail(joined ? 'The connection to the host was interrupted. Rejoin with the same room code.' : JOIN_CONNECTION_ERROR);
+      });
     });
   }
   send(action) {

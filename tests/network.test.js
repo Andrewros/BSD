@@ -5,6 +5,7 @@ import { TableNetwork } from '../network.js';
 
 class FakePeer extends EventEmitter {
   constructor(id) { super(); this.id = id; this.destroyed = false; }
+  connect() { return new Connection(); }
   destroy() { this.destroyed = true; }
   reconnect() {}
 }
@@ -73,5 +74,28 @@ test('the first character claim received wins, and another player can claim it o
     b.emit('data', claim);
     assert.equal(net.game.players.find(p => p.id === bId).character, 'jimmy');
     assert.equal(a.messages.at(-1).state.players.find(p => p.id === bId).character, 'jimmy');
+  } finally { net.destroy(); }
+});
+test('guest can retry when the connection closes before the first game state', () => {
+  const statuses = [], errors = [];
+  const net = new TableNetwork({ PeerClass: FakePeer, onState() {}, onStatus: s => statuses.push(s), onError: e => errors.push(e) });
+  try {
+    net.join('ABC234', 'Guest', guestId);
+    net.peer.emit('open');
+    net.conn.close();
+    assert.deepEqual(statuses, ['error']);
+    assert.match(errors[0], /WebRTC connection/);
+  } finally { net.destroy(); }
+});
+test('guest sees the reason the host rejected their seat after the connection closes', () => {
+  const statuses = [], errors = [];
+  const net = new TableNetwork({ PeerClass: FakePeer, onState() {}, onStatus: s => statuses.push(s), onError: e => errors.push(e) });
+  try {
+    net.join('ABC234', 'Guest', guestId);
+    net.peer.emit('open');
+    net.conn.emit('data', { type: 'rejected', message: 'The table is full.' });
+    net.conn.close();
+    assert.deepEqual(statuses, ['error']);
+    assert.deepEqual(errors, ['The table is full.']);
   } finally { net.destroy(); }
 });
